@@ -1,0 +1,39 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: chatbot-backend
+  
+  # MySQL 数据库配置
+  datasource:
+    url: jdbc:mysql://localhost:3306/chatbot?createDatabaseIfNotExist=true&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: root
+    password: cyh789456123
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  
+  # JPA 配置
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQLDialect
+        format_sql: true
+
+# Python Agent Configuration
+python-agent:
+  base-url: http://localhost:8000
+  timeout: 60000
+
+# JWT Configuration
+jwt:
+  secret: chatbot-secret-key-for-jwt-token-generation-must-be-at-least-256-bits-long
+  expiration: 86400000
+
+logging:
+  level:
+    com.chatbot: DEBUG
+    org.springframework.web: INFO
+    org.springframework.security: DEBUG
