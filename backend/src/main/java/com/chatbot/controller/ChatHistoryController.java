@@ -3,6 +3,7 @@ package com.chatbot.controller;
 import com.chatbot.dto.ApiResponse;
 import com.chatbot.dto.ChatHistoryDTO;
 import com.chatbot.dto.SessionDTO;
+import com.chatbot.dto.SessionStatsDTO;
 import com.chatbot.service.ChatHistoryService;
 import com.chatbot.service.ChatSessionService;
 import lombok.RequiredArgsConstructor;
@@ -12,6 +13,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 
@@ -60,6 +62,19 @@ public class ChatHistoryController {
                 authentication.getName(), sessionId
         );
         return ResponseEntity.ok(ApiResponse.success(history));
+    }
+    
+    /**
+     * 获取指定会话的统计信息
+     */
+    @GetMapping("/session/{sessionId}/stats")
+    public ResponseEntity<ApiResponse<SessionStatsDTO>> getSessionStats(
+            Authentication authentication,
+            @PathVariable String sessionId
+    ) {
+        String username = authentication.getName();
+        SessionStatsDTO stats = chatHistoryService.getSessionStats(username, sessionId);
+        return ResponseEntity.ok(ApiResponse.success(stats));
     }
     
     /**

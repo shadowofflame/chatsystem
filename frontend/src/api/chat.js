@@ -74,11 +74,15 @@ export const authApi = {
 export const chatApi = {
   /**
    * 发送聊天消息
+   * @param {string} message - 消息内容
+   * @param {string} sessionId - 会话ID
+   * @param {boolean} enableWebSearch - 是否启用联网搜索
    */
-  sendMessage: async (message, sessionId = 'default') => {
+  sendMessage: async (message, sessionId = 'default', enableWebSearch = false) => {
     const response = await apiClient.post('/chat', {
       message,
       sessionId,
+      enableWebSearch,
     });
     return response;
   },
@@ -169,6 +173,14 @@ export const historyApi = {
   },
 
   /**
+   * 获取指定会话的统计信息
+   */
+  getSessionStats: async (sessionId) => {
+    const response = await apiClient.get(`/history/session/${sessionId}/stats`);
+    return response;
+  },
+
+  /**
    * 删除所有历史
    */
   deleteAllHistory: async () => {
@@ -177,4 +189,134 @@ export const historyApi = {
   },
 };
 
-export default { authApi, chatApi, historyApi };
+// 文件 API
+export const fileApi = {
+  /**
+   * 上传文件
+   * @param {File} file - 要上传的文件
+   */
+  uploadFile: async (file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    const token = localStorage.getItem('token');
+    const response = await fetch('/api/files/upload', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+      body: formData,
+    });
+    
+    return response.json();
+  },
+
+  /**
+   * 分析文件
+   * @param {string} filepath - 文件路径
+   * @param {string} question - 关于文件的问题
+   */
+  analyzeFile: async (filepath, question = '请分析这个文件的内容') => {
+    const response = await apiClient.post('/files/analyze', {
+      filepath,
+      question,
+    });
+    return response;
+  },
+
+  /**
+   * 列出已上传的文件
+   */
+  listFiles: async () => {
+    const response = await apiClient.get('/files/list');
+    return response;
+  },
+};
+
+// 充值 API
+export const rechargeApi = {
+  /**
+   * 创建充值订单
+   */
+  createOrder: async (amount) => {
+    const response = await apiClient.post('/recharge/create', { amount });
+    return response;
+  },
+
+  /**
+   * 确认支付
+   */
+  confirmPayment: async (orderNo) => {
+    const response = await apiClient.post(`/recharge/confirm/${orderNo}`);
+    return response;
+  },
+
+  /**
+   * 取消订单
+   */
+  cancelOrder: async (orderNo) => {
+    const response = await apiClient.post(`/recharge/cancel/${orderNo}`);
+    return response;
+  },
+
+  /**
+   * 获取用户余额
+   */
+  getBalance: async () => {
+    const response = await apiClient.get('/recharge/balance');
+    return response;
+  },
+
+  /**
+   * 获取充值订单列表
+   */
+  getOrders: async () => {
+    const response = await apiClient.get('/recharge/orders');
+    return response;
+  },
+
+  /**
+   * 获取当前待支付订单
+   */
+  getPendingOrder: async () => {
+    const response = await apiClient.get('/recharge/pending');
+    return response;
+  },
+
+  /**
+   * 获取过期订单通知
+   */
+  getExpiredNotifications: async () => {
+    const response = await apiClient.get('/recharge/expired-notifications');
+    return response;
+  },
+};
+
+// 模型 API
+export const modelApi = {
+  /**
+   * 获取所有可用模型
+   */
+  getModels: async () => {
+    const response = await apiClient.get('/models');
+    return response;
+  },
+
+  /**
+   * 获取启用的模型
+   */
+  getEnabledModels: async () => {
+    const response = await apiClient.get('/models/enabled');
+    return response;
+  },
+
+  /**
+   * 获取指定模型详情
+   */
+  getModelByName: async (modelName) => {
+    const response = await apiClient.get(`/models/${modelName}`);
+    return response;
+  },
+};
+
+export default { authApi, chatApi, historyApi, fileApi, rechargeApi, modelApi };

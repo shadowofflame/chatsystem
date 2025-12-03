@@ -16,4 +16,10 @@ public class ChatRequest {
     private String message;
     
     private String sessionId;
+    
+    /**
+     * 是否启用联网搜索
+     */
+    @Builder.Default
+    private Boolean enableWebSearch = false;
 }

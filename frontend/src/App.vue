@@ -78,7 +78,21 @@
             <h1>智能对话助手</h1>
           </div>
           <div class="header-actions">
+            <span class="user-balance" @click="openRecharge" title="点击充值">
+              💰 ¥{{ userBalance.toFixed(2) }}
+            </span>
             <span class="user-info">{{ user?.nickname || user?.username }}</span>
+            <button class="btn btn-ghost" @click="openModelsModal" title="可用模型">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"></path>
+              </svg>
+            </button>
+            <button class="btn btn-ghost" @click="openRecharge" title="充值">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="1" y="4" width="22" height="16" rx="2" ry="2"></rect>
+                <line x1="1" y1="10" x2="23" y2="10"></line>
+              </svg>
+            </button>
             <button class="btn btn-ghost" @click="openHistory" title="历史记录">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <circle cx="12" cy="12" r="10"></circle>
@@ -134,16 +148,27 @@
                 <div class="session-name">{{ session.title || `会话 ${session.sessionId.substring(0, 8)}` }}</div>
                 <div class="session-time">{{ formatDateTime(session.lastMessageTime) }}</div>
               </div>
-              <button 
-                class="session-delete" 
-                @click.stop="deleteSessionConfirm(session.sessionId)"
-                title="删除会话"
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <polyline points="3 6 5 6 21 6"></polyline>
-                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                </svg>
-              </button>
+              <div class="session-actions">
+                <button 
+                  class="session-stats-btn" 
+                  @click.stop="showSessionStats(session.sessionId)"
+                  title="查看统计"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M18 20V10M12 20V4M6 20v-6"></path>
+                  </svg>
+                </button>
+                <button 
+                  class="session-delete" 
+                  @click.stop="deleteSessionConfirm(session.sessionId)"
+                  title="删除会话"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="3 6 5 6 21 6"></polyline>
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                  </svg>
+                </button>
+              </div>
             </div>
           </div>
         </aside>
@@ -184,7 +209,12 @@
                 </div>
                 <div class="message-content">
                   <div class="message-bubble" v-html="formatMessage(msg.content)"></div>
-                  <div class="message-time">{{ formatTime(msg.timestamp) }}</div>
+                  <div class="message-meta">
+                    <span class="message-time">{{ formatTime(msg.timestamp) }}</span>
+                    <span v-if="msg.role === 'assistant' && msg.cost !== undefined && msg.cost !== null" class="message-cost" :title="`输入: ${msg.inputCharCount}字, 输出: ${msg.outputCharCount}字, 总计: ${msg.totalCharCount}字`">
+                      💰 ¥{{ parseFloat(msg.cost).toFixed(2) }}
+                    </span>
+                  </div>
                 </div>
               </div>
 
@@ -208,12 +238,66 @@
 
           <!-- 输入区域 -->
           <div class="input-area">
+            <!-- 功能开关 -->
+            <div class="input-options">
+              <label class="toggle-switch" title="启用联网搜索获取最新信息">
+                <input type="checkbox" v-model="enableWebSearch">
+                <span class="toggle-slider"></span>
+                <span class="toggle-label">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="2" y1="12" x2="22" y2="12"></line>
+                    <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+                  </svg>
+                  联网搜索
+                </span>
+              </label>
+            </div>
+            
+            <!-- 已上传文件显示 -->
+            <div v-if="uploadedFile" class="uploaded-file-preview">
+              <div class="file-info">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                  <polyline points="14 2 14 8 20 8"></polyline>
+                </svg>
+                <span class="file-name">{{ uploadedFile.name }}</span>
+                <span class="file-size">({{ formatFileSize(uploadedFile.size) }})</span>
+              </div>
+              <button class="remove-file-btn" @click="removeUploadedFile" title="移除文件">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+              </button>
+            </div>
+            
             <div class="input-container">
+              <!-- 文件上传按钮 -->
+              <input 
+                type="file" 
+                ref="fileInput" 
+                @change="handleFileSelect" 
+                style="display: none"
+                accept=".txt,.pdf,.doc,.docx,.md,.json,.csv,.py,.java,.js,.ts,.html,.css,.xml,.yaml,.yml"
+              >
+              <button 
+                class="upload-btn" 
+                @click="$refs.fileInput.click()" 
+                :disabled="isLoading || isUploading"
+                title="上传文件"
+              >
+                <svg v-if="!isUploading" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
+                </svg>
+                <span v-else class="upload-spinner"></span>
+              </button>
+              
               <textarea
                 ref="inputField"
                 v-model="inputMessage"
                 @keydown.enter.exact.prevent="sendMessage"
-                placeholder="输入消息..."
+                :placeholder="getInputPlaceholder()"
                 rows="1"
                 :disabled="isLoading"
               ></textarea>
@@ -256,7 +340,100 @@
                   <span class="history-label">助手：</span>
                   {{ item.assistantResponse }}
                 </div>
-                <div class="history-time">{{ formatDateTime(item.createdAt) }}</div>
+                <div class="history-meta">
+                  <span class="history-time">{{ formatDateTime(item.createdAt) }}</span>
+                  <span v-if="item.cost !== undefined && item.cost !== null" class="history-cost" :title="`输入: ${item.inputCharCount}字, 输出: ${item.outputCharCount}字, 总计: ${item.totalCharCount}字`">
+                    💰 ¥{{ parseFloat(item.cost).toFixed(2) }}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 可用模型列表弹窗 -->
+      <div v-if="showModelsModal" class="modal-overlay" @click.self="showModelsModal = false">
+        <div class="modal modal-models">
+          <div class="modal-header">
+            <h3>🤖 可用模型</h3>
+            <button class="close-btn" @click="showModelsModal = false">&times;</button>
+          </div>
+          <div class="modal-body">
+            <div v-if="modelsLoading" class="loading-text">加载中...</div>
+            <div v-else-if="modelsList.length === 0" class="empty-text">暂无可用模型</div>
+            <div v-else class="models-list">
+              <div 
+                v-for="model in modelsList" 
+                :key="model.id" 
+                class="model-card"
+              >
+                <div class="model-header">
+                  <div class="model-name">{{ model.displayName }}</div>
+                  <div class="model-provider">{{ model.provider }}</div>
+                </div>
+                <div class="model-price">
+                  <span class="price-label">计费标准</span>
+                  <span class="price-value">¥{{ parseFloat(model.pricePer10kChars).toFixed(2) }} / 万字</span>
+                </div>
+                <div class="model-services" v-if="model.serviceCount > 0">
+                  <span class="service-count">{{ model.serviceCount }} 次调用</span>
+                </div>
+                <div class="model-description" v-if="model.serviceDescription">
+                  {{ model.serviceDescription }}
+                </div>
+                <div class="model-features" v-if="model.capabilities && model.capabilities.length > 0">
+                  <span 
+                    v-for="(capability, idx) in model.capabilities" 
+                    :key="idx" 
+                    class="feature-tag"
+                  >{{ capability }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 会话统计弹窗 -->
+      <div v-if="showSessionStatsModal" class="modal-overlay" @click.self="showSessionStatsModal = false">
+        <div class="modal">
+          <div class="modal-header">
+            <h3>📊 会话统计</h3>
+            <button class="close-btn" @click="showSessionStatsModal = false">&times;</button>
+          </div>
+          <div class="modal-body">
+            <div v-if="sessionStatsLoading" class="loading-text">加载中...</div>
+            <div v-else class="session-stats-content">
+              <div class="stats-section">
+                <h4>🤖 使用模型</h4>
+                <div class="stats-value model-name">{{ sessionStatsData.model || 'deepseek-chat' }}</div>
+              </div>
+              <div class="stats-section">
+                <h4>📝 字数统计</h4>
+                <div class="stats-grid">
+                  <div class="stat-box">
+                    <div class="stat-label">输入字数</div>
+                    <div class="stat-number">{{ sessionStatsData.inputCharCount?.toLocaleString() || 0 }}</div>
+                  </div>
+                  <div class="stat-box">
+                    <div class="stat-label">输出字数</div>
+                    <div class="stat-number">{{ sessionStatsData.outputCharCount?.toLocaleString() || 0 }}</div>
+                  </div>
+                  <div class="stat-box">
+                    <div class="stat-label">总字数</div>
+                    <div class="stat-number">{{ sessionStatsData.totalCharCount?.toLocaleString() || 0 }}</div>
+                  </div>
+                  <div class="stat-box">
+                    <div class="stat-label">对话次数</div>
+                    <div class="stat-number">{{ sessionStatsData.messageCount || 0 }}</div>
+                  </div>
+                </div>
+              </div>
+              <div class="stats-section">
+                <h4>💰 消费金额</h4>
+                <div class="stats-value cost-value">¥{{ parseFloat(sessionStatsData.totalCost || 0).toFixed(2) }}</div>
+                <div class="cost-hint">计费规则：每10000字收费1元</div>
               </div>
             </div>
           </div>
@@ -303,6 +480,130 @@
         </div>
       </div>
 
+      <!-- 充值弹窗 -->
+      <div v-if="showRecharge" class="modal-overlay" @click.self="closeRecharge">
+        <div class="modal modal-recharge">
+          <div class="modal-header">
+            <h3>💰 账户充值</h3>
+            <button class="close-btn" @click="closeRecharge">&times;</button>
+          </div>
+          <div class="modal-body">
+            <!-- 余额显示 -->
+            <div class="balance-display">
+              <span class="balance-label">当前余额</span>
+              <span class="balance-value">¥{{ userBalance.toFixed(2) }}</span>
+            </div>
+
+            <!-- 如果有待支付订单 -->
+            <div v-if="currentOrder" class="pending-order">
+              <div class="order-info">
+                <h4>待支付订单</h4>
+                <p class="order-no">订单号: {{ currentOrder.orderNo }}</p>
+                <p class="order-amount">充值金额: <strong>¥{{ currentOrder.amount }}</strong></p>
+                <p class="order-countdown" :class="{ warning: remainingTime < 60 }">
+                  剩余支付时间: <strong>{{ formatCountdown(remainingTime) }}</strong>
+                </p>
+              </div>
+              <div class="order-actions">
+                <button class="btn btn-primary btn-lg" @click="confirmPayment" :disabled="rechargeLoading">
+                  {{ rechargeLoading ? '处理中...' : '确认已支付' }}
+                </button>
+                <button class="btn btn-ghost" @click="cancelRechargeOrder" :disabled="rechargeLoading">
+                  取消订单
+                </button>
+              </div>
+              <p class="payment-note">
+                💡 由于本系统为演示版本，点击"确认已支付"即可完成充值
+              </p>
+            </div>
+
+            <!-- 创建新订单 -->
+            <div v-else class="recharge-form">
+              <h4>选择充值金额</h4>
+              <div class="amount-options">
+                <button 
+                  v-for="amount in [50, 100, 200]" 
+                  :key="amount"
+                  :class="['amount-btn', { active: rechargeAmount === amount && !isCustomAmount }]"
+                  @click="selectAmount(amount)"
+                >
+                  ¥{{ amount }}
+                </button>
+                <button 
+                  :class="['amount-btn', { active: isCustomAmount }]"
+                  @click="selectCustomAmount"
+                >
+                  自定义
+                </button>
+              </div>
+              
+              <div v-if="isCustomAmount" class="custom-amount">
+                <label>输入金额</label>
+                <input 
+                  type="number" 
+                  v-model="customAmount" 
+                  placeholder="请输入充值金额（最低1元）"
+                  min="1"
+                  step="0.01"
+                />
+              </div>
+
+              <div class="recharge-summary">
+                <span>充值金额:</span>
+                <strong>¥{{ getRechargeAmount().toFixed(2) }}</strong>
+              </div>
+
+              <button 
+                class="btn btn-primary btn-lg btn-block" 
+                @click="createRechargeOrder"
+                :disabled="rechargeLoading || getRechargeAmount() < 1"
+              >
+                {{ rechargeLoading ? '创建订单中...' : '立即充值' }}
+              </button>
+              
+              <p class="recharge-note">
+                ⏰ 订单创建后请在5分钟内完成支付，超时将自动取消
+              </p>
+            </div>
+
+            <!-- 充值记录链接 -->
+            <div class="recharge-history-link">
+              <a href="#" @click.prevent="openRechargeHistory">查看充值记录 →</a>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 充值记录弹窗 -->
+      <div v-if="showRechargeHistory" class="modal-overlay" @click.self="showRechargeHistory = false">
+        <div class="modal modal-lg">
+          <div class="modal-header">
+            <h3>充值记录</h3>
+            <button class="close-btn" @click="showRechargeHistory = false">&times;</button>
+          </div>
+          <div class="modal-body">
+            <div v-if="rechargeOrders.length === 0" class="empty-text">暂无充值记录</div>
+            <div v-else class="recharge-orders-list">
+              <div 
+                v-for="order in rechargeOrders" 
+                :key="order.id" 
+                :class="['order-item', order.status.toLowerCase()]"
+              >
+                <div class="order-left">
+                  <div class="order-amount-display">¥{{ order.amount }}</div>
+                  <div class="order-time">{{ formatDateTime(order.createdAt) }}</div>
+                </div>
+                <div class="order-right">
+                  <span :class="['order-status', order.status.toLowerCase()]">
+                    {{ order.statusText }}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Toast 提示 -->
       <div v-if="toast.show" :class="['toast', toast.type]">
         {{ toast.message }}
@@ -312,10 +613,10 @@
 </template>
 
 <script>
-import { ref, nextTick, onMounted, computed } from 'vue';
+import { ref, nextTick, onMounted, onUnmounted, computed } from 'vue';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
-import { authApi, chatApi, historyApi } from './api/chat';
+import { authApi, chatApi, historyApi, fileApi, rechargeApi, modelApi } from './api/chat';
 
 export default {
   name: 'App',
@@ -348,11 +649,49 @@ export default {
     const stats = ref(null);
     const messagesWrapper = ref(null);
     const inputField = ref(null);
+    const fileInput = ref(null);
     const toast = ref({ show: false, message: '', type: 'info' });
+    const enableWebSearch = ref(false);  // 联网搜索开关
+    
+    // 会话统计相关
+    const showSessionStatsModal = ref(false);
+    const sessionStatsLoading = ref(false);
+    const sessionStatsData = ref({
+      model: 'deepseek-chat',
+      inputCharCount: 0,
+      outputCharCount: 0,
+      totalCharCount: 0,
+      messageCount: 0,
+      totalCost: 0
+    });
+    
+    // 模型列表相关
+    const showModelsModal = ref(false);
+    const modelsLoading = ref(false);
+    const modelsList = ref([]);
+    
+    // 文件上传相关
+    const uploadedFile = ref(null);
+    const uploadedFilePath = ref(null);
+    const isUploading = ref(false);
     
     // 历史记录
     const chatHistory = ref([]);
     const historyLoading = ref(false);
+
+    // 充值相关
+    const showRecharge = ref(false);
+    const userBalance = ref(0);
+    const rechargeAmount = ref(50);
+    const customAmount = ref('');
+    const isCustomAmount = ref(false);
+    const currentOrder = ref(null);
+    const rechargeLoading = ref(false);
+    const countdownTimer = ref(null);
+    const remainingTime = ref(0);
+    const rechargeOrders = ref([]);
+    const showRechargeHistory = ref(false);
+    const expiredCheckInterval = ref(null);
 
     // 配置 marked
     marked.setOptions({
@@ -425,6 +764,8 @@ export default {
           token.value = response.data.token;
           user.value = response.data;
           showToast('登录成功', 'success');
+          // 登录成功后加载会话列表
+          await loadSessions();
         } else {
           showToast(response.message || '登录失败', 'error');
         }
@@ -451,6 +792,7 @@ export default {
           token.value = response.data.token;
           user.value = response.data;
           showToast('注册成功', 'success');
+          // 注册成功后会话列表为空，不需要特别加载
         } else {
           showToast(response.message || '注册失败', 'error');
         }
@@ -546,6 +888,49 @@ export default {
       await loadSessionMessages(sessionId);
     };
 
+    // 显示会话统计
+    const showSessionStats = async (sessionId) => {
+      showSessionStatsModal.value = true;
+      sessionStatsLoading.value = true;
+      
+      try {
+        const response = await historyApi.getSessionStats(sessionId);
+        if (response.success && response.data) {
+          sessionStatsData.value = {
+            model: response.data.model || 'deepseek-chat',
+            inputCharCount: response.data.inputCharCount || 0,
+            outputCharCount: response.data.outputCharCount || 0,
+            totalCharCount: response.data.totalCharCount || 0,
+            messageCount: response.data.messageCount || 0,
+            totalCost: response.data.totalCost || 0
+          };
+        }
+      } catch (error) {
+        console.error('获取会话统计失败:', error);
+        showToast('获取统计信息失败', 'error');
+      } finally {
+        sessionStatsLoading.value = false;
+      }
+    };
+
+    // 打开模型列表弹窗
+    const openModelsModal = async () => {
+      showModelsModal.value = true;
+      modelsLoading.value = true;
+      
+      try {
+        const response = await modelApi.getEnabledModels();
+        if (response.success && response.data) {
+          modelsList.value = response.data;
+        }
+      } catch (error) {
+        console.error('获取模型列表失败:', error);
+        showToast('获取模型列表失败', 'error');
+      } finally {
+        modelsLoading.value = false;
+      }
+    };
+
     // 删除会话确认
     const deleteSessionConfirm = async (sessionId) => {
       if (!confirm('确定要删除这个会话吗？此操作不可恢复。')) return;
@@ -573,6 +958,69 @@ export default {
       }
     };
 
+    // 文件上传处理
+    const handleFileSelect = async (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
+      
+      // 检查文件大小（限制 10MB）
+      const maxSize = 10 * 1024 * 1024;
+      if (file.size > maxSize) {
+        showToast('文件大小不能超过 10MB', 'error');
+        event.target.value = '';
+        return;
+      }
+      
+      isUploading.value = true;
+      
+      try {
+        const response = await fileApi.uploadFile(file);
+        if (response.success) {
+          uploadedFile.value = {
+            name: file.name,
+            size: file.size,
+            type: file.type
+          };
+          uploadedFilePath.value = response.data.filepath;
+          showToast('文件上传成功', 'success');
+        } else {
+          showToast(response.message || '文件上传失败', 'error');
+        }
+      } catch (error) {
+        console.error('文件上传错误:', error);
+        showToast('文件上传失败', 'error');
+      } finally {
+        isUploading.value = false;
+        event.target.value = '';
+      }
+    };
+
+    // 移除已上传文件
+    const removeUploadedFile = () => {
+      uploadedFile.value = null;
+      uploadedFilePath.value = null;
+    };
+
+    // 格式化文件大小
+    const formatFileSize = (bytes) => {
+      if (bytes === 0) return '0 B';
+      const k = 1024;
+      const sizes = ['B', 'KB', 'MB', 'GB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    };
+
+    // 获取输入框占位符
+    const getInputPlaceholder = () => {
+      if (uploadedFile.value) {
+        return `已选择文件: ${uploadedFile.value.name}，输入问题...`;
+      }
+      if (enableWebSearch.value) {
+        return '输入消息 (联网搜索已开启)...';
+      }
+      return '输入消息...';
+    };
+
     // 发送消息
     const sendMessage = async () => {
       const content = inputMessage.value.trim();
@@ -586,24 +1034,51 @@ export default {
         createNewSession();
       }
 
-      // 添加用户消息
+      // 构建显示内容和实际发送内容
+      let displayContent = content;
+      let actualContent = content;
+      
+      // 如果有上传文件，添加文件信息
+      if (uploadedFile.value && uploadedFilePath.value) {
+        displayContent = `📎 [${uploadedFile.value.name}] ${content}`;
+        actualContent = `请分析文件 ${uploadedFilePath.value} 的内容，然后回答以下问题：${content}`;
+      } else if (enableWebSearch.value) {
+        displayContent = `🌐 ${content}`;
+      }
+      
       messages.value.push({
         role: 'user',
-        content,
+        content: displayContent,
         timestamp: new Date().toISOString(),
       });
       inputMessage.value = '';
+      
+      // 清除上传文件状态
+      const hadFile = !!uploadedFile.value;
+      removeUploadedFile();
+      
       isLoading.value = true;
       scrollToBottom();
 
       try {
-        const response = await chatApi.sendMessage(content, currentSessionId.value);
+        // 发送请求时传入联网搜索参数
+        const response = await chatApi.sendMessage(actualContent, currentSessionId.value, enableWebSearch.value);
         if (response.success && response.data) {
           messages.value.push({
             role: 'assistant',
             content: response.data.message,
             timestamp: new Date().toISOString(),
+            // 费用相关信息
+            cost: response.data.cost,
+            inputCharCount: response.data.inputCharCount,
+            outputCharCount: response.data.outputCharCount,
+            totalCharCount: response.data.totalCharCount,
           });
+          
+          // 更新余额显示
+          if (response.data.newBalance !== null && response.data.newBalance !== undefined) {
+            userBalance.value = parseFloat(response.data.newBalance);
+          }
           
           // 如果是第一条消息，等待后端生成标题后重新加载会话列表
           if (isFirstMessage) {
@@ -723,6 +1198,203 @@ export default {
       }
     };
 
+    // ========== 充值功能 ==========
+    
+    // 加载用户余额
+    const loadBalance = async () => {
+      try {
+        const response = await rechargeApi.getBalance();
+        if (response.success && response.data) {
+          userBalance.value = response.data.balance;
+        }
+      } catch (error) {
+        console.error('加载余额失败:', error);
+      }
+    };
+
+    // 打开充值弹窗
+    const openRecharge = async () => {
+      showRecharge.value = true;
+      rechargeAmount.value = 50;
+      isCustomAmount.value = false;
+      customAmount.value = '';
+      await loadBalance();
+      // 检查是否有待支付订单
+      await checkPendingOrder();
+    };
+
+    // 检查待支付订单
+    const checkPendingOrder = async () => {
+      try {
+        const response = await rechargeApi.getPendingOrder();
+        if (response.success && response.data) {
+          currentOrder.value = response.data;
+          startCountdown(response.data.remainingSeconds);
+        }
+      } catch (error) {
+        console.error('检查待支付订单失败:', error);
+      }
+    };
+
+    // 选择充值金额
+    const selectAmount = (amount) => {
+      rechargeAmount.value = amount;
+      isCustomAmount.value = false;
+      customAmount.value = '';
+    };
+
+    // 选择自定义金额
+    const selectCustomAmount = () => {
+      isCustomAmount.value = true;
+      rechargeAmount.value = 0;
+    };
+
+    // 获取实际充值金额
+    const getRechargeAmount = () => {
+      if (isCustomAmount.value) {
+        return parseFloat(customAmount.value) || 0;
+      }
+      return rechargeAmount.value;
+    };
+
+    // 创建充值订单
+    const createRechargeOrder = async () => {
+      const amount = getRechargeAmount();
+      if (amount < 1) {
+        showToast('充值金额不能小于1元', 'error');
+        return;
+      }
+      
+      rechargeLoading.value = true;
+      try {
+        const response = await rechargeApi.createOrder(amount);
+        if (response.success && response.data) {
+          currentOrder.value = response.data;
+          startCountdown(response.data.remainingSeconds);
+          showToast('订单创建成功，请在5分钟内完成支付', 'success');
+        } else {
+          showToast(response.message || '创建订单失败', 'error');
+        }
+      } catch (error) {
+        showToast('创建订单失败', 'error');
+      } finally {
+        rechargeLoading.value = false;
+      }
+    };
+
+    // 确认支付
+    const confirmPayment = async () => {
+      if (!currentOrder.value) return;
+      
+      rechargeLoading.value = true;
+      try {
+        const response = await rechargeApi.confirmPayment(currentOrder.value.orderNo);
+        if (response.success && response.data) {
+          showToast(`充值成功！余额增加 ¥${currentOrder.value.amount}`, 'success');
+          currentOrder.value = null;
+          stopCountdown();
+          await loadBalance();
+        } else {
+          showToast(response.message || '支付失败', 'error');
+        }
+      } catch (error) {
+        showToast('支付失败', 'error');
+      } finally {
+        rechargeLoading.value = false;
+      }
+    };
+
+    // 取消订单
+    const cancelRechargeOrder = async () => {
+      if (!currentOrder.value) return;
+      
+      try {
+        const response = await rechargeApi.cancelOrder(currentOrder.value.orderNo);
+        if (response.success) {
+          showToast('订单已取消', 'info');
+          currentOrder.value = null;
+          stopCountdown();
+        } else {
+          showToast(response.message || '取消失败', 'error');
+        }
+      } catch (error) {
+        showToast('取消失败', 'error');
+      }
+    };
+
+    // 开始倒计时
+    const startCountdown = (seconds) => {
+      stopCountdown();
+      remainingTime.value = seconds;
+      countdownTimer.value = setInterval(() => {
+        remainingTime.value--;
+        if (remainingTime.value <= 0) {
+          stopCountdown();
+          currentOrder.value = null;
+          showToast('订单已过期', 'warning');
+        }
+      }, 1000);
+    };
+
+    // 停止倒计时
+    const stopCountdown = () => {
+      if (countdownTimer.value) {
+        clearInterval(countdownTimer.value);
+        countdownTimer.value = null;
+      }
+    };
+
+    // 格式化倒计时
+    const formatCountdown = (seconds) => {
+      const mins = Math.floor(seconds / 60);
+      const secs = seconds % 60;
+      return `${mins}:${secs.toString().padStart(2, '0')}`;
+    };
+
+    // 加载充值历史
+    const loadRechargeHistory = async () => {
+      try {
+        const response = await rechargeApi.getOrders();
+        if (response.success && response.data) {
+          rechargeOrders.value = response.data;
+        }
+      } catch (error) {
+        console.error('加载充值历史失败:', error);
+      }
+    };
+
+    // 打开充值历史
+    const openRechargeHistory = async () => {
+      showRechargeHistory.value = true;
+      await loadRechargeHistory();
+    };
+
+    // 检查过期订单通知
+    const checkExpiredNotifications = async () => {
+      if (!user.value) return;
+      try {
+        const response = await rechargeApi.getExpiredNotifications();
+        if (response.success && response.data && response.data.length > 0) {
+          for (const order of response.data) {
+            showToast(`订单 ${order.orderNo} 已过期，充值金额 ¥${order.amount} 未到账`, 'warning');
+          }
+          // 如果当前订单过期了，清除它
+          if (currentOrder.value && response.data.some(o => o.orderNo === currentOrder.value.orderNo)) {
+            currentOrder.value = null;
+            stopCountdown();
+          }
+        }
+      } catch (error) {
+        console.error('检查过期通知失败:', error);
+      }
+    };
+
+    // 关闭充值弹窗
+    const closeRecharge = () => {
+      showRecharge.value = false;
+      stopCountdown();
+    };
+
     // 初始化
     onMounted(async () => {
       // 恢复用户信息
@@ -731,6 +1403,18 @@ export default {
         user.value = JSON.parse(savedUser);
         // 加载会话列表
         await loadSessions();
+        // 加载用户余额
+        await loadBalance();
+        // 启动过期订单检查（每30秒）
+        expiredCheckInterval.value = setInterval(checkExpiredNotifications, 30000);
+      }
+    });
+
+    // 清理定时器
+    onUnmounted(() => {
+      stopCountdown();
+      if (expiredCheckInterval.value) {
+        clearInterval(expiredCheckInterval.value);
       }
     });
 
@@ -758,6 +1442,15 @@ export default {
       createNewSession,
       switchSession,
       deleteSessionConfirm,
+      showSessionStats,
+      showSessionStatsModal,
+      sessionStatsLoading,
+      sessionStatsData,
+      // 模型列表
+      showModelsModal,
+      modelsLoading,
+      modelsList,
+      openModelsModal,
       // 聊天
       messages,
       inputMessage,
@@ -767,9 +1460,19 @@ export default {
       stats,
       messagesWrapper,
       inputField,
+      fileInput,
       toast,
       chatHistory,
       historyLoading,
+      enableWebSearch,  // 联网搜索开关
+      // 文件上传
+      uploadedFile,
+      isUploading,
+      handleFileSelect,
+      removeUploadedFile,
+      formatFileSize,
+      getInputPlaceholder,
+      // 其他方法
       formatMessage,
       formatTime,
       formatDateTime,
@@ -779,6 +1482,27 @@ export default {
       clearAllMemory,
       deleteAllHistory,
       openHistory,
+      // 充值相关
+      showRecharge,
+      userBalance,
+      rechargeAmount,
+      customAmount,
+      isCustomAmount,
+      currentOrder,
+      rechargeLoading,
+      remainingTime,
+      rechargeOrders,
+      showRechargeHistory,
+      openRecharge,
+      closeRecharge,
+      selectAmount,
+      selectCustomAmount,
+      getRechargeAmount,
+      createRechargeOrder,
+      confirmPayment,
+      cancelRechargeOrder,
+      formatCountdown,
+      openRechargeHistory,
     };
   },
 };
@@ -983,27 +1707,45 @@ export default {
   opacity: 0.7;
 }
 
+.session-actions {
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.session-item:hover .session-actions {
+  opacity: 1;
+}
+
+.session-stats-btn,
 .session-delete {
   background: transparent;
   border: none;
   padding: 4px;
   cursor: pointer;
-  opacity: 0;
+  opacity: 0.6;
   transition: opacity 0.2s;
   color: inherit;
 }
 
-.session-item:hover .session-delete {
-  opacity: 0.6;
-}
-
+.session-stats-btn:hover,
 .session-delete:hover {
-  opacity: 1 !important;
+  opacity: 1;
 }
 
+.session-stats-btn svg,
 .session-delete svg {
   width: 16px;
   height: 16px;
+}
+
+.session-stats-btn:hover {
+  color: var(--primary-color);
+}
+
+.session-delete:hover {
+  color: #e74c3c;
 }
 
 .chat-container {
@@ -1142,10 +1884,38 @@ export default {
   box-shadow: var(--shadow);
 }
 
+.message-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px;
+}
+
 .message-time {
   font-size: 11px;
   color: rgba(255, 255, 255, 0.7);
-  padding: 0 4px;
+}
+
+.message-cost {
+  font-size: 11px;
+  color: #ffd700;
+  background: rgba(0, 0, 0, 0.2);
+  padding: 2px 6px;
+  border-radius: 4px;
+  cursor: help;
+}
+
+.message.assistant .message-meta {
+  color: var(--text-muted);
+}
+
+.message.assistant .message-time {
+  color: var(--text-muted);
+}
+
+.message.assistant .message-cost {
+  color: #e67e22;
+  background: rgba(230, 126, 34, 0.1);
 }
 
 /* 打字动画 */
@@ -1184,6 +1954,76 @@ export default {
 .input-area {
   padding: 16px 20px 24px;
   background: transparent;
+}
+
+/* 输入选项（联网搜索开关等） */
+.input-options {
+  display: flex;
+  justify-content: flex-start;
+  margin-bottom: 10px;
+  padding-left: 10px;
+}
+
+.toggle-switch {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+}
+
+.toggle-switch input {
+  display: none;
+}
+
+.toggle-slider {
+  width: 36px;
+  height: 20px;
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 10px;
+  position: relative;
+  transition: background 0.3s;
+  margin-right: 8px;
+}
+
+.toggle-slider::after {
+  content: '';
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  background: white;
+  border-radius: 50%;
+  top: 2px;
+  left: 2px;
+  transition: transform 0.3s;
+}
+
+.toggle-switch input:checked + .toggle-slider {
+  background: #4CAF50;
+}
+
+.toggle-switch input:checked + .toggle-slider::after {
+  transform: translateX(16px);
+}
+
+.toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: white;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.toggle-label svg {
+  opacity: 0.9;
+}
+
+.toggle-switch input:checked ~ .toggle-label {
+  color: #4CAF50;
+}
+
+.toggle-switch input:checked ~ .toggle-label svg {
+  stroke: #4CAF50;
 }
 
 .input-container {
@@ -1292,6 +2132,57 @@ export default {
   padding: 20px;
 }
 
+/* 历史记录列表样式 */
+.history-list {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.history-item {
+  padding: 12px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.history-item:last-child {
+  border-bottom: none;
+}
+
+.history-user,
+.history-assistant {
+  margin-bottom: 8px;
+  line-height: 1.5;
+}
+
+.history-label {
+  font-weight: 600;
+  color: var(--primary-color);
+}
+
+.history-assistant .history-label {
+  color: var(--secondary-color);
+}
+
+.history-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.history-time {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.history-cost {
+  font-size: 12px;
+  color: #e67e22;
+  background: rgba(230, 126, 34, 0.1);
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: help;
+}
+
 .setting-group {
   margin-bottom: 24px;
 }
@@ -1334,6 +2225,182 @@ export default {
 
 .stat-value {
   font-weight: 600;
+}
+
+/* 会话统计弹窗样式 */
+.session-stats-content {
+  padding: 10px 0;
+}
+
+.stats-section {
+  margin-bottom: 24px;
+}
+
+.stats-section:last-child {
+  margin-bottom: 0;
+}
+
+.stats-section h4 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+
+.stats-value {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text-color);
+}
+
+.stats-value.model-name {
+  color: var(--primary-color);
+  font-size: 18px;
+  background: rgba(52, 152, 219, 0.1);
+  padding: 8px 16px;
+  border-radius: 8px;
+  display: inline-block;
+}
+
+.stats-value.cost-value {
+  color: #e67e22;
+  font-size: 32px;
+}
+
+.cost-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 8px;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.stat-box {
+  background: var(--bg-color);
+  border-radius: 12px;
+  padding: 16px;
+  text-align: center;
+}
+
+.stat-box .stat-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.stat-box .stat-number {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text-color);
+}
+
+/* 模型列表弹窗样式 */
+.modal-models {
+  max-width: 600px;
+  max-height: 80vh;
+}
+
+.modal-models .modal-body {
+  max-height: calc(80vh - 60px);
+  overflow-y: auto;
+}
+
+.models-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.model-card {
+  background: var(--bg-color);
+  border-radius: 12px;
+  padding: 20px;
+  border: 1px solid var(--border-color);
+  transition: all 0.2s ease;
+}
+
+.model-card:hover {
+  border-color: var(--primary-color);
+  box-shadow: 0 4px 12px rgba(52, 152, 219, 0.15);
+}
+
+.model-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.model-name {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-color);
+}
+
+.model-provider {
+  font-size: 12px;
+  color: var(--text-muted);
+  background: var(--sidebar-bg);
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.model-price {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px;
+  background: rgba(230, 126, 34, 0.1);
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+
+.price-label {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.price-value {
+  font-size: 16px;
+  font-weight: 600;
+  color: #e67e22;
+}
+
+.model-services {
+  margin-bottom: 12px;
+}
+
+.service-count {
+  font-size: 13px;
+  color: var(--primary-color);
+  background: rgba(52, 152, 219, 0.1);
+  padding: 4px 10px;
+  border-radius: 12px;
+}
+
+.model-description {
+  font-size: 14px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin-bottom: 12px;
+}
+
+.model-features {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.feature-tag {
+  font-size: 12px;
+  color: #27ae60;
+  background: rgba(39, 174, 96, 0.1);
+  padding: 4px 10px;
+  border-radius: 12px;
 }
 
 /* Toast */
@@ -1400,5 +2467,373 @@ export default {
   padding: 20px;
   color: var(--text-muted);
   font-size: 14px;
+}
+
+/* 文件上传样式 */
+.uploaded-file-preview {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--primary-light);
+  border: 1px solid var(--primary);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+}
+
+.uploaded-file-preview .file-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--primary);
+}
+
+.uploaded-file-preview .file-name {
+  font-weight: 500;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.uploaded-file-preview .file-size {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.remove-file-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.remove-file-btn:hover {
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+}
+
+.upload-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  transition: all 0.2s;
+}
+
+.upload-btn:hover:not(:disabled) {
+  background: var(--primary-light);
+  color: var(--primary);
+}
+
+.upload-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.upload-btn svg {
+  width: 20px;
+  height: 20px;
+}
+
+.upload-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--border);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 用户余额显示 */
+.user-balance {
+  background: linear-gradient(135deg, #ffd700 0%, #ffb347 100%);
+  color: #333;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-right: 8px;
+}
+
+.user-balance:hover {
+  transform: scale(1.05);
+  box-shadow: 0 2px 8px rgba(255, 215, 0, 0.4);
+}
+
+/* 充值弹窗 */
+.modal-recharge {
+  max-width: 420px;
+}
+
+.balance-display {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  padding: 20px;
+  border-radius: 12px;
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.balance-label {
+  display: block;
+  font-size: 14px;
+  opacity: 0.9;
+  margin-bottom: 4px;
+}
+
+.balance-value {
+  font-size: 32px;
+  font-weight: 700;
+}
+
+/* 待支付订单 */
+.pending-order {
+  background: #fff9e6;
+  border: 1px solid #ffd700;
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 16px;
+}
+
+.pending-order h4 {
+  color: #d97706;
+  margin-bottom: 12px;
+}
+
+.order-no {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.order-amount {
+  font-size: 16px;
+  margin-bottom: 8px;
+}
+
+.order-amount strong {
+  color: var(--primary);
+  font-size: 24px;
+}
+
+.order-countdown {
+  font-size: 14px;
+  color: #059669;
+}
+
+.order-countdown.warning {
+  color: #dc2626;
+  animation: pulse 1s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.order-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.order-actions .btn {
+  flex: 1;
+}
+
+.payment-note {
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+/* 充值表单 */
+.recharge-form h4 {
+  margin-bottom: 12px;
+  color: var(--text-color);
+}
+
+.amount-options {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.amount-btn {
+  padding: 12px 8px;
+  border: 2px solid var(--border-color);
+  border-radius: 8px;
+  background: white;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.amount-btn:hover {
+  border-color: var(--primary);
+  background: var(--primary-light);
+}
+
+.amount-btn.active {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: white;
+}
+
+.custom-amount {
+  margin-bottom: 16px;
+}
+
+.custom-amount label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.custom-amount input {
+  width: 100%;
+  padding: 12px;
+  border: 2px solid var(--border-color);
+  border-radius: 8px;
+  font-size: 16px;
+}
+
+.custom-amount input:focus {
+  border-color: var(--primary);
+  outline: none;
+}
+
+.recharge-summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px;
+  background: var(--bg-light);
+  border-radius: 8px;
+  margin-bottom: 16px;
+}
+
+.recharge-summary strong {
+  font-size: 24px;
+  color: var(--primary);
+}
+
+.btn-block {
+  width: 100%;
+}
+
+.btn-lg {
+  padding: 14px 24px;
+  font-size: 16px;
+}
+
+.recharge-note {
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.recharge-history-link {
+  margin-top: 16px;
+  text-align: center;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-color);
+}
+
+.recharge-history-link a {
+  color: var(--primary);
+  text-decoration: none;
+  font-size: 14px;
+}
+
+.recharge-history-link a:hover {
+  text-decoration: underline;
+}
+
+/* 充值记录列表 */
+.recharge-orders-list {
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.order-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.order-item:last-child {
+  border-bottom: none;
+}
+
+.order-left {
+  display: flex;
+  flex-direction: column;
+}
+
+.order-amount-display {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-color);
+}
+
+.order-time {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.order-status {
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.order-status.paid {
+  background: #d1fae5;
+  color: #059669;
+}
+
+.order-status.pending {
+  background: #fef3c7;
+  color: #d97706;
+}
+
+.order-status.expired {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.order-status.cancelled {
+  background: #f3f4f6;
+  color: #6b7280;
 }
 </style>

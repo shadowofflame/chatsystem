@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -30,10 +31,15 @@ public class ChatSessionService {
         User user = userRepository.findByUsername(username)
                 .orElseThrow(() -> new RuntimeException("用户不存在"));
         
-        // 检查会话是否已存在
+        // 检查会话是否已存在（只检查当前用户的会话）
+        Optional<ChatSession> existingSession = chatSessionRepository.findByUserAndSessionId(user, sessionId);
+        if (existingSession.isPresent()) {
+            return existingSession.get();
+        }
+        
+        // 如果 sessionId 被其他用户使用，为当前用户生成新的 sessionId
         if (chatSessionRepository.existsBySessionId(sessionId)) {
-            return chatSessionRepository.findBySessionId(sessionId)
-                    .orElseThrow(() -> new RuntimeException("会话不存在"));
+            sessionId = java.util.UUID.randomUUID().toString();
         }
         
         ChatSession session = ChatSession.builder()
@@ -92,10 +98,21 @@ public class ChatSessionService {
     }
     
     /**
-     * 获取会话信息
+     * 获取会话信息（不验证用户）
      */
     public ChatSession getSession(String sessionId) {
         return chatSessionRepository.findBySessionId(sessionId)
+                .orElse(null);
+    }
+    
+    /**
+     * 获取用户的指定会话
+     */
+    public ChatSession getUserSession(String username, String sessionId) {
+        User user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new RuntimeException("用户不存在"));
+        
+        return chatSessionRepository.findByUserAndSessionId(user, sessionId)
                 .orElse(null);
     }
     

@@ -9,6 +9,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 @Repository
@@ -33,4 +34,16 @@ public interface ChatHistoryRepository extends JpaRepository<ChatHistory, Long> 
     void deleteByUser(User user);
     
     long countByUser(User user);
+    
+    /**
+     * 计算用户的总消费金额
+     */
+    @Query("SELECT SUM(c.cost) FROM ChatHistory c WHERE c.user = :user")
+    BigDecimal sumCostByUser(@Param("user") User user);
+    
+    /**
+     * 计算指定会话的总消费金额
+     */
+    @Query("SELECT SUM(c.cost) FROM ChatHistory c WHERE c.user = :user AND c.sessionId = :sessionId")
+    BigDecimal sumCostByUserAndSessionId(@Param("user") User user, @Param("sessionId") String sessionId);
 }

@@ -46,6 +46,10 @@ public class User implements UserDetails {
     @Column(name = "last_login")
     private LocalDateTime lastLogin;
     
+    @Column(name = "balance", nullable = false)
+    @Builder.Default
+    private java.math.BigDecimal balance = java.math.BigDecimal.ZERO;
+    
     @Builder.Default
     private Boolean enabled = true;
     

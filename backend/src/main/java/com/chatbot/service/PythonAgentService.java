@@ -25,14 +25,17 @@ public class PythonAgentService {
      */
     public ChatResponse chat(ChatRequest request) {
         try {
-            log.debug("Sending chat request to Python Agent: {}", request.getMessage());
+            log.debug("Sending chat request to Python Agent: {}, enableWebSearch: {}", 
+                    request.getMessage(), request.getEnableWebSearch());
+            
+            Map<String, Object> requestBody = new java.util.HashMap<>();
+            requestBody.put("message", request.getMessage());
+            requestBody.put("session_id", request.getSessionId() != null ? request.getSessionId() : "default");
+            requestBody.put("enable_web_search", request.getEnableWebSearch() != null && request.getEnableWebSearch());
             
             Map<String, Object> response = pythonAgentWebClient.post()
                     .uri("/api/chat")
-                    .bodyValue(Map.of(
-                            "message", request.getMessage(),
-                            "session_id", request.getSessionId() != null ? request.getSessionId() : "default"
-                    ))
+                    .bodyValue(requestBody)
                     .retrieve()
                     .bodyToMono(Map.class)
                     .block();
