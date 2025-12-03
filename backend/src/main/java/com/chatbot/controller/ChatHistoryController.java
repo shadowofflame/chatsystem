@@ -2,7 +2,9 @@ package com.chatbot.controller;
 
 import com.chatbot.dto.ApiResponse;
 import com.chatbot.dto.ChatHistoryDTO;
+import com.chatbot.dto.SessionDTO;
 import com.chatbot.service.ChatHistoryService;
+import com.chatbot.service.ChatSessionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -20,6 +22,7 @@ import java.util.Map;
 public class ChatHistoryController {
     
     private final ChatHistoryService chatHistoryService;
+    private final ChatSessionService chatSessionService;
     
     /**
      * 获取用户的所有对话历史
@@ -63,8 +66,8 @@ public class ChatHistoryController {
      * 获取用户的所有会话列表
      */
     @GetMapping("/sessions")
-    public ResponseEntity<ApiResponse<List<String>>> getUserSessions(Authentication authentication) {
-        List<String> sessions = chatHistoryService.getUserSessions(authentication.getName());
+    public ResponseEntity<ApiResponse<List<SessionDTO>>> getUserSessions(Authentication authentication) {
+        List<SessionDTO> sessions = chatSessionService.getUserSessions(authentication.getName());
         return ResponseEntity.ok(ApiResponse.success(sessions));
     }
     
@@ -85,7 +88,11 @@ public class ChatHistoryController {
             Authentication authentication,
             @PathVariable String sessionId
     ) {
-        chatHistoryService.deleteSession(authentication.getName(), sessionId);
+        String username = authentication.getName();
+        // 删除会话历史记录
+        chatHistoryService.deleteSession(username, sessionId);
+        // 删除会话元数据
+        chatSessionService.deleteSession(username, sessionId);
         return ResponseEntity.ok(ApiResponse.success("会话删除成功", null));
     }
     
@@ -94,7 +101,9 @@ public class ChatHistoryController {
      */
     @DeleteMapping("/all")
     public ResponseEntity<ApiResponse<Void>> deleteAllHistory(Authentication authentication) {
-        chatHistoryService.deleteAllHistory(authentication.getName());
+        String username = authentication.getName();
+        chatHistoryService.deleteAllHistory(username);
+        chatSessionService.deleteAllSessions(username);
         return ResponseEntity.ok(ApiResponse.success("所有对话历史已删除", null));
     }
 }

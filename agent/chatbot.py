@@ -4,6 +4,8 @@
 """
 
 import os
+import json
+from pathlib import Path
 from typing import List, Dict, Optional
 from dotenv import load_dotenv
 
@@ -31,6 +33,8 @@ class ChatbotWithMemory:
     2. 长时记忆：使用向量数据库存储和检索
     3. 使用 LangChain LCEL 构建对话链
     4. 支持 DeepSeek API
+    5. 从 JSON 文件加载多种 prompt 模板
+    6. 支持文本总结、信息提取等多种功能
     """
     
     def __init__(
@@ -40,7 +44,8 @@ class ChatbotWithMemory:
         model: str = "deepseek-chat",
         memory_dir: str = "./memory_db",
         short_term_limit: int = 10,
-        retrieve_memories: int = 5
+        retrieve_memories: int = 5,
+        prompts_file: str = "prompts.json"
     ):
         """
         初始化对话机器人
@@ -52,6 +57,7 @@ class ChatbotWithMemory:
             memory_dir: 向量数据库存储目录
             short_term_limit: 短时记忆保留的对话轮数
             retrieve_memories: 每次检索的相关记忆数量
+            prompts_file: prompt配置文件路径
         """
         # 获取配置
         api_key = api_key or os.getenv("OPENAI_API_KEY")
@@ -59,6 +65,9 @@ class ChatbotWithMemory:
         
         if not api_key:
             raise ValueError("请设置OPENAI_API_KEY环境变量或传入api_key参数（DeepSeek API Key）")
+        
+        # 加载 prompts 配置
+        self.prompts = self._load_prompts(prompts_file)
         
         # 初始化 LangChain ChatOpenAI（兼容 DeepSeek）
         self.llm = ChatOpenAI(
@@ -82,20 +91,8 @@ class ChatbotWithMemory:
             memory_key="chat_history"
         )
         
-        # 系统提示词
-        self.system_prompt = """你是一个友好、有帮助的AI助手，具有长时记忆能力。
-
-你的特点：
-1. 你能记住与用户之前的对话内容
-2. 你会主动关联之前的对话信息来提供更个性化的回复
-3. 你会注意用户提到的个人信息、偏好和重要事项
-4. 当用户询问之前讨论过的内容时，你会尽力回忆并提供准确的信息
-
-在回复时：
-- 如果检索到相关的历史记忆，自然地将其融入对话中
-- 不要生硬地说"根据我的记忆"，而是自然地引用之前的对话
-- 如果用户提供了新的个人信息，在对话中确认并记住它
-- 保持友好和个性化的对话风格"""
+        # 从配置文件获取系统提示词
+        self.system_prompt = self.prompts.get("chat", {}).get("system_prompt", "你是一个有帮助的AI助手。")
 
         # 构建对话提示模板
         self.prompt = ChatPromptTemplate.from_messages([
@@ -107,6 +104,43 @@ class ChatbotWithMemory:
         
         # 构建 LCEL 链
         self.chain = self.prompt | self.llm | StrOutputParser()
+
+    def _load_prompts(self, prompts_file: str) -> Dict:
+        """
+        从 JSON 文件加载 prompt 配置
+        
+        Args:
+            prompts_file: prompt配置文件路径
+            
+        Returns:
+            prompt配置字典
+        """
+        prompts_path = Path(prompts_file)
+        
+        # 如果是相对路径，从当前脚本目录查找
+        if not prompts_path.is_absolute():
+            script_dir = Path(__file__).parent
+            prompts_path = script_dir / prompts_file
+        
+        try:
+            with open(prompts_path, 'r', encoding='utf-8') as f:
+                prompts = json.load(f)
+            print(f"✓ 成功加载 prompt 配置文件: {prompts_path}")
+            return prompts
+        except FileNotFoundError:
+            print(f"⚠ 未找到 prompt 配置文件: {prompts_path}，使用默认配置")
+            return {
+                "chat": {
+                    "system_prompt": "你是一个友好、有帮助的AI助手。"
+                }
+            }
+        except json.JSONDecodeError as e:
+            print(f"⚠ prompt 配置文件格式错误: {e}，使用默认配置")
+            return {
+                "chat": {
+                    "system_prompt": "你是一个友好、有帮助的AI助手。"
+                }
+            }
 
     def _build_memory_context(self, query: str) -> str:
         """
@@ -200,6 +234,100 @@ class ChatbotWithMemory:
             self.memory_store.add_fact(fact, category="extracted")
         
         return response
+    
+    def summarize(self, text: str, max_length: Optional[int] = None) -> str:
+        """
+        对文本进行总结
+        
+        Args:
+            text: 需要总结的文本
+            max_length: 总结的最大长度（可选）
+            
+        Returns:
+            总结后的文本
+        """
+        # 获取总结的 prompt 配置
+        summarize_config = self.prompts.get("summarize", {})
+        system_prompt = summarize_config.get("system_prompt", "你是一个专业的文本总结助手。")
+        user_template = summarize_config.get("user_template", "请对以下文本进行总结：\n\n{text}")
+        
+        # 构建总结提示
+        user_message = user_template.format(text=text)
+        if max_length:
+            user_message += f"\n\n要求：总结长度不超过{max_length}字。"
+        
+        # 创建简单的总结链
+        summarize_prompt = ChatPromptTemplate.from_messages([
+            ("system", system_prompt),
+            ("human", user_message)
+        ])
+        
+        summarize_chain = summarize_prompt | self.llm | StrOutputParser()
+        
+        try:
+            summary = summarize_chain.invoke({})
+            return summary
+        except Exception as e:
+            return f"总结失败: {str(e)}"
+    
+    def extract_information(self, text: str) -> str:
+        """
+        从文本中提取关键信息
+        
+        Args:
+            text: 需要提取信息的文本
+            
+        Returns:
+            提取的关键信息
+        """
+        extract_config = self.prompts.get("extract_info", {})
+        system_prompt = extract_config.get("system_prompt", "你是一个信息提取专家。")
+        user_template = extract_config.get("user_template", "请从以下文本中提取关键信息：\n\n{text}")
+        
+        user_message = user_template.format(text=text)
+        
+        extract_prompt = ChatPromptTemplate.from_messages([
+            ("system", system_prompt),
+            ("human", user_message)
+        ])
+        
+        extract_chain = extract_prompt | self.llm | StrOutputParser()
+        
+        try:
+            result = extract_chain.invoke({})
+            return result
+        except Exception as e:
+            return f"信息提取失败: {str(e)}"
+    
+    def translate(self, text: str, target_language: str = "English") -> str:
+        """
+        翻译文本
+        
+        Args:
+            text: 需要翻译的文本
+            target_language: 目标语言
+            
+        Returns:
+            翻译后的文本
+        """
+        translate_config = self.prompts.get("translate", {})
+        system_prompt = translate_config.get("system_prompt", "你是一个专业的翻译助手。")
+        user_template = translate_config.get("user_template", "请将以下文本翻译成{target_language}：\n\n{text}")
+        
+        user_message = user_template.format(text=text, target_language=target_language)
+        
+        translate_prompt = ChatPromptTemplate.from_messages([
+            ("system", system_prompt),
+            ("human", user_message)
+        ])
+        
+        translate_chain = translate_prompt | self.llm | StrOutputParser()
+        
+        try:
+            result = translate_chain.invoke({})
+            return result
+        except Exception as e:
+            return f"翻译失败: {str(e)}"
     
     def get_memory_stats(self) -> Dict:
         """获取记忆统计信息"""

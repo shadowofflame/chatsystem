@@ -132,4 +132,40 @@ public class PythonAgentService {
             return false;
         }
     }
+    
+    /**
+     * 调用 Python Agent 总结文本
+     */
+    public String summarizeText(String text, Integer maxLength) {
+        try {
+            log.debug("Sending summarize request to Python Agent, text length: {}", text.length());
+            
+            Map<String, Object> requestBody = Map.of(
+                    "text", text,
+                    "max_length", maxLength != null ? maxLength : 15
+            );
+            
+            Map<String, Object> response = pythonAgentWebClient.post()
+                    .uri("/api/summarize")
+                    .bodyValue(requestBody)
+                    .retrieve()
+                    .bodyToMono(Map.class)
+                    .block();
+            
+            if (response != null && response.containsKey("summary")) {
+                String summary = (String) response.get("summary");
+                log.debug("Received summary from Python Agent: {}", summary);
+                return summary;
+            }
+            
+            return text.length() > 20 ? text.substring(0, 20) + "..." : text;
+            
+        } catch (WebClientResponseException e) {
+            log.error("Python Agent summarize error: {} - {}", e.getStatusCode(), e.getResponseBodyAsString());
+            return text.length() > 20 ? text.substring(0, 20) + "..." : text;
+        } catch (Exception e) {
+            log.error("Error calling summarize API", e);
+            return text.length() > 20 ? text.substring(0, 20) + "..." : text;
+        }
+    }
 }

@@ -74,6 +74,32 @@ class MemoryStatsResponse(BaseModel):
     short_term_messages: int = Field(..., description="短时记忆消息数量")
 
 
+class SummarizeRequest(BaseModel):
+    text: str = Field(..., description="需要总结的文本")
+    max_length: Optional[int] = Field(15, description="总结的最大长度（字数）")
+
+
+class SummarizeResponse(BaseModel):
+    summary: str = Field(..., description="总结结果")
+
+
+class ExtractRequest(BaseModel):
+    text: str = Field(..., description="需要提取信息的文本")
+
+
+class ExtractResponse(BaseModel):
+    extracted_info: str = Field(..., description="提取的关键信息")
+
+
+class TranslateRequest(BaseModel):
+    text: str = Field(..., description="需要翻译的文本")
+    target_language: str = Field(default="English", description="目标语言")
+
+
+class TranslateResponse(BaseModel):
+    translated_text: str = Field(..., description="翻译后的文本")
+
+
 class SuccessResponse(BaseModel):
     success: bool = Field(..., description="操作是否成功")
     message: str = Field(default="", description="消息")
@@ -158,6 +184,63 @@ async def clear_all_memory():
     try:
         chatbot.clear_all_memory()
         return SuccessResponse(success=True, message="All memory cleared")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/summarize", response_model=SummarizeResponse)
+async def summarize_text(request: SummarizeRequest):
+    """
+    文本总结接口
+    
+    对输入的文本进行智能总结
+    """
+    global chatbot
+    
+    if chatbot is None:
+        raise HTTPException(status_code=503, detail="Chatbot not initialized")
+    
+    try:
+        summary = chatbot.summarize(request.text, request.max_length)
+        return SummarizeResponse(summary=summary)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/extract", response_model=ExtractResponse)
+async def extract_information(request: ExtractRequest):
+    """
+    信息提取接口
+    
+    从文本中提取关键信息
+    """
+    global chatbot
+    
+    if chatbot is None:
+        raise HTTPException(status_code=503, detail="Chatbot not initialized")
+    
+    try:
+        extracted = chatbot.extract_information(request.text)
+        return ExtractResponse(extracted_info=extracted)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/translate", response_model=TranslateResponse)
+async def translate_text(request: TranslateRequest):
+    """
+    翻译接口
+    
+    将文本翻译成指定语言
+    """
+    global chatbot
+    
+    if chatbot is None:
+        raise HTTPException(status_code=503, detail="Chatbot not initialized")
+    
+    try:
+        translated = chatbot.translate(request.text, request.target_language)
+        return TranslateResponse(translated_text=translated)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

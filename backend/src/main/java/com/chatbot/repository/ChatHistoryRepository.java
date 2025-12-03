@@ -23,6 +23,11 @@ public interface ChatHistoryRepository extends JpaRepository<ChatHistory, Long> 
     @Query("SELECT DISTINCT c.sessionId FROM ChatHistory c WHERE c.user = :user ORDER BY MAX(c.createdAt) DESC")
     List<String> findDistinctSessionIdsByUser(@Param("user") User user);
     
+    @Query("SELECT c FROM ChatHistory c WHERE c.user = :user AND c.id IN " +
+           "(SELECT MIN(ch.id) FROM ChatHistory ch WHERE ch.user = :user GROUP BY ch.sessionId) " +
+           "ORDER BY c.createdAt DESC")
+    List<ChatHistory> findFirstMessageBySessionForUser(@Param("user") User user);
+    
     void deleteByUserAndSessionId(User user, String sessionId);
     
     void deleteByUser(User user);

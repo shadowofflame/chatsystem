@@ -5,6 +5,7 @@ import com.chatbot.dto.ChatRequest;
 import com.chatbot.dto.ChatResponse;
 import com.chatbot.dto.MemoryStats;
 import com.chatbot.service.ChatHistoryService;
+import com.chatbot.service.ChatSessionService;
 import com.chatbot.service.PythonAgentService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -21,6 +22,7 @@ public class ChatController {
     
     private final PythonAgentService pythonAgentService;
     private final ChatHistoryService chatHistoryService;
+    private final ChatSessionService chatSessionService;
     
     /**
      * 发送聊天消息
@@ -33,16 +35,30 @@ public class ChatController {
         String username = authentication.getName();
         log.info("Received chat request from user {}: {}", username, request.getMessage());
         
+        String sessionId = request.getSessionId() != null ? request.getSessionId() : "default";
+        
+        // 确保会话存在，如果不存在则创建
+        if (chatSessionService.getSession(sessionId) == null) {
+            chatSessionService.createSession(username, sessionId);
+        }
+        
         ChatResponse response = pythonAgentService.chat(request);
         
         if (response.isSuccess()) {
             // 保存到对话历史
             chatHistoryService.saveChat(
                     username,
-                    request.getSessionId() != null ? request.getSessionId() : "default",
+                    sessionId,
                     request.getMessage(),
                     response.getMessage()
             );
+            
+            // 增加会话消息计数
+            chatSessionService.incrementMessageCount(sessionId);
+            
+            // 在第一条消息后更新会话标题
+            chatSessionService.updateSessionTitle(sessionId, request.getMessage());
+            
             return ResponseEntity.ok(ApiResponse.success(response));
         } else {
             return ResponseEntity.ok(ApiResponse.error(response.getError()));
