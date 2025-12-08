@@ -22,4 +22,22 @@ public class ChatRequest {
      */
     @Builder.Default
     private Boolean enableWebSearch = false;
+    
+    /**
+     * 是否启用深度思考(TOT - Tree of Thoughts)
+     */
+    @Builder.Default
+    private Boolean deepThink = false;
+    
+    /**
+     * 思考分支数量 (TOT参数)
+     */
+    @Builder.Default
+    private Integer thoughtBranches = 3;
+    
+    /**
+     * 思考深度 (TOT参数)
+     */
+    @Builder.Default
+    private Integer thoughtDepth = 2;
 }

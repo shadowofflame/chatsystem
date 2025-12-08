@@ -1,6 +1,13 @@
 # 智能对话助手 - 全栈版
 
-基于 **Java 21 + Spring Boot 3 + Python Agent + Vue 3** 的智能对话机器人，具有长时记忆功能。
+基于 **Java 21 + Spring Boot 3 + Python Agent + Vue 3** 的智能对话机器人，具有长时记忆和**深度思考 (Tree-of-Thoughts)** 功能。
+
+## ✨ 新增功能
+
+- 🧠 **深度思考 (TOT)** - Tree-of-Thoughts 多分支推理
+- 🎨 **LangGraph Studio** - 可视化调试界面
+- 💬 **STDIO 模式** - 命令行交互支持
+- 🔄 **混合模式** - HTTP API + STDIO 同时运行
 
 ## 📁 项目结构
 
@@ -18,14 +25,18 @@ chatbot-with-memory/
 │   │       └── resources/
 │   │           └── application.yml
 │   └── pom.xml
-├── agent/                   # Python Agent (FastAPI + LangChain)
-│   ├── main.py              # FastAPI 服务入口
-│   ├── chatbot.py           # 对话机器人核心
+├── agent/                   # Python Agent (FastAPI + LangGraph)
+│   ├── main.py              # 多模式入口 (API/STDIO/混合)
+│   ├── langgraph_agent.py   # LangGraph 状态机 Agent
+│   ├── langgraph_studio.py  # LangGraph Studio 入口
+│   ├── tot_reasoner.py      # Tree-of-Thoughts 深度思考
 │   ├── memory_store.py      # 向量记忆存储
+│   ├── tools.py             # 工具集 (搜索/文件/计算)
+│   ├── langgraph.json       # LangGraph Studio 配置
 │   └── requirements.txt
 ├── frontend/                # 前端 (Vue 3 + Vite)
 │   ├── src/
-│   │   ├── App.vue
+│   │   ├── App.vue          # 主界面 (含深度思考开关)
 │   │   ├── main.js
 │   │   ├── style.css
 │   │   └── api/
@@ -40,18 +51,18 @@ chatbot-with-memory/
 ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
 │                 │     │                 │     │                 │
 │    Frontend     │────▶│  Java Backend   │────▶│  Python Agent   │
-│   (Vue 3)       │     │ (Spring Boot)   │     │   (FastAPI)     │
-│   Port: 5173    │     │   Port: 8080    │     │   Port: 8000    │
+│   (Vue 3)       │     │ (Spring Boot)   │     │   (LangGraph)   │
+│   Port: 5173    │     │   Port: 9090    │     │   Port: 8000    │
 │                 │     │                 │     │                 │
 └─────────────────┘     └─────────────────┘     └────────┬────────┘
                                                          │
-                                                         ▼
-                                               ┌─────────────────┐
-                                               │                 │
-                                               │  ChromaDB       │
-                                               │  (向量数据库)    │
-                                               │                 │
-                                               └─────────────────┘
+                              ┌──────────────────────────┼──────────────────────────┐
+                              │                          │                          │
+                              ▼                          ▼                          ▼
+                    ┌─────────────────┐      ┌─────────────────┐      ┌─────────────────┐
+                    │   ChromaDB      │      │  TOT Reasoner   │      │  LangGraph      │
+                    │  (向量记忆)      │      │  (深度思考)      │      │  Studio (2024)  │
+                    └─────────────────┘      └─────────────────┘      └─────────────────┘
 ```
 
 ## 🚀 快速开始
@@ -60,9 +71,10 @@ chatbot-with-memory/
 
 - **Java**: 21+
 - **Maven**: 3.8+
-- **Python**: 3.10+
+- **Python**: 3.11+ (推荐 3.11-3.12，3.13 需要特定版本)
 - **Node.js**: 18+
 - **npm**: 9+
+- **MySQL**: 8.0+
 
 ### 1. 启动 Python Agent
 
@@ -81,13 +93,25 @@ pip install -r requirements.txt
 copy .env.example .env
 # 编辑 .env 文件，设置你的 DeepSeek API Key
 
-# 启动服务
-python main.py
+# 启动服务 (多种模式可选)
+python main.py                    # HTTP API 模式
+python main.py --deep             # 启用深度思考
+python main.py --stdio --deep     # STDIO 命令行模式
+python main.py --hybrid --deep    # 混合模式 (API + STDIO)
 ```
 
 Agent 将在 `http://localhost:8000` 启动。
 
-### 2. 启动 Java 后端
+### 2. 启动 LangGraph Studio (可选)
+
+```bash
+cd agent
+langgraph dev
+```
+
+访问 https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024
+
+### 3. 启动 Java 后端
 
 ```bash
 cd backend
@@ -100,9 +124,9 @@ mvn clean package
 java -jar target/chatbot-backend-1.0.0.jar
 ```
 
-后端将在 `http://localhost:8080` 启动。
+后端将在 `http://localhost:9090` 启动。
 
-### 3. 启动前端
+### 4. 启动前端
 
 ```bash
 cd frontend
@@ -116,9 +140,41 @@ npm run dev
 
 前端将在 `http://localhost:5173` 启动。
 
+## 🧠 深度思考 (Tree-of-Thoughts)
+
+### 工作原理
+
+```
+用户问题
+    ↓
+生成多个思考分支 (默认3个)
+    ↓
+对每个分支进行评分
+    ↓
+选择最佳路径继续深入
+    ↓
+迭代指定深度 (默认2层)
+    ↓
+返回最优推理结果
+```
+
+### 使用方式
+
+1. **前端界面**: 点击 🧠 深度思考开关
+2. **API 调用**: 设置 `deep_think: true`
+3. **命令行**: `python main.py --deep`
+
+### 参数配置
+
+| 参数 | 说明 | 默认值 |
+|-----|------|--------|
+| `--deep` | 启用深度思考 | false |
+| `--branches` | 思考分支数 | 3 |
+| `--depth` | 思考深度 | 2 |
+
 ## 📡 API 文档
 
-### Java 后端 API
+### Java 后端 API (Port: 9090)
 
 | 方法 | 路径 | 描述 |
 |-----|------|------|
@@ -130,19 +186,21 @@ npm run dev
 
 ### 请求示例
 
-**发送消息**
+**发送消息 (含深度思考)**
 ```bash
-curl -X POST http://localhost:8080/api/chat \
+curl -X POST http://localhost:9090/api/chat \
   -H "Content-Type: application/json" \
-  -d '{"message": "你好，我叫张三", "sessionId": "default"}'
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -d '{
+    "message": "分析一下人工智能的发展趋势",
+    "sessionId": "default",
+    "deepThink": true,
+    "thoughtBranches": 3,
+    "thoughtDepth": 2
+  }'
 ```
 
-**获取统计**
-```bash
-curl http://localhost:8080/api/chat/stats
-```
-
-### Python Agent API
+### Python Agent API (Port: 8000)
 
 | 方法 | 路径 | 描述 |
 |-----|------|------|
@@ -161,6 +219,15 @@ curl http://localhost:8080/api/chat/stats
 | **短时记忆** | `ConversationBufferWindowMemory` | 当前会话上下文，保留最近10轮 |
 | **长时记忆** | `ChromaDB` + 向量检索 | 持久化存储，语义搜索 |
 
+### LangGraph 工具集
+
+| 工具 | 功能 | 触发方式 |
+|-----|------|---------|
+| 🌐 **网络搜索** | DuckDuckGo 实时搜索 | 询问时事、新闻、最新信息 |
+| 📁 **文件操作** | 读写文件、目录管理 | 请求分析文件、保存内容 |
+| 🧮 **数学计算** | 复杂数学运算 | 数学问题、计算请求 |
+| 🧠 **深度思考** | TOT 多分支推理 | 开启深度思考开关 |
+
 ### 自动事实提取
 
 系统会自动从对话中提取关键信息：
@@ -177,23 +244,44 @@ curl http://localhost:8080/api/chat/stats
 
 ```yaml
 server:
-  port: 8080
+  port: 9090
 
 python-agent:
   base-url: http://localhost:8000
-  timeout: 60000
+  timeout: 180000  # 3分钟，支持深度思考
 
-cors:
-  allowed-origins:
-    - http://localhost:5173
+spring:
+  datasource:
+    url: jdbc:mysql://localhost:3306/chatbot
+    username: root
+    password: your_password
 ```
 
 ### Python Agent 配置 (`agent/.env`)
 
 ```env
+# DeepSeek API 配置
 OPENAI_API_KEY=your_deepseek_api_key
 OPENAI_BASE_URL=https://api.deepseek.com
+
+# Agent 配置
 AGENT_PORT=8000
+```
+
+### 前端配置 (`frontend/vite.config.js`)
+
+```javascript
+export default defineConfig({
+  server: {
+    port: 5173,
+    proxy: {
+      '/api': {
+        target: 'http://localhost:9090',
+        changeOrigin: true,
+      }
+    }
+  }
+})
 ```
 
 ## 🛠️ 开发指南
@@ -234,19 +322,27 @@ npm run preview
 - Java 21
 - Spring Boot 3.2
 - Spring WebFlux (WebClient)
+- Spring Security + JWT
+- MySQL 8.0
+- Flyway (数据库迁移)
 - Lombok
 
 ### Python Agent
-- Python 3.10+
-- FastAPI
-- LangChain
-- ChromaDB
+- **Python 3.13+** (推荐) / Python 3.11+
+- FastAPI + Uvicorn
+- LangChain + LangGraph
+- LangGraph Studio (可视化调试)
+- ChromaDB (向量数据库)
+- **PyTorch 2.6.0** (针对Python 3.13优化)
+- **sentence-transformers 3.0.1** (兼容性锁定)
+- Tree-of-Thoughts (TOT深度推理)
+- OpenTelemetry 1.38.0 (链路追踪)
 - HuggingFace Embeddings
 
 ### 前端
 - Vue 3
 - Vite 5
-- Axios
+- Axios (超时180秒支持深度思考)
 - Marked (Markdown 渲染)
 - DOMPurify (XSS 防护)
 
@@ -421,6 +517,54 @@ self.chain = self.prompt | self.llm | StrOutputParser()
 3. **多模型切换**：轻松切换不同 LLM
 4. **流式输出**：使用 `stream()` 方法
 5. **回调监控**：添加 LangChain Callbacks
+
+## 🔧 故障排除
+
+### Python 3.13 Meta Tensor 错误
+
+**错误信息：**
+```
+NotImplementedError: Cannot copy out of meta tensor; no data!
+```
+
+**原因：** PyTorch 2.9.1 + sentence-transformers 5.x 在 Python 3.13 上存在兼容性问题
+
+**解决方案：**
+```bash
+pip install torch==2.6.0 sentence-transformers==3.0.1
+```
+
+### OpenTelemetry 版本冲突
+
+**错误信息：**
+```
+opentelemetry-instrumentation-asgi 0.53b0 requires opentelemetry-api~=1.32
+```
+
+**解决方案：** 锁定所有 OpenTelemetry 版本为 1.38.0：
+```
+opentelemetry-api==1.38.0
+opentelemetry-sdk==1.38.0
+opentelemetry-instrumentation==0.59b0
+```
+
+### 深度思考请求超时
+
+**错误信息：** 前端显示 "发送失败，请检查网络"
+
+**原因：** 深度思考 (TOT) 需要较长时间，默认60秒超时不够
+
+**解决方案：**
+1. 前端 `chat.js` 超时设为 180000ms
+2. 后端 `application.yml` 中 `python-agent.timeout` 设为 180000
+
+### LangGraph Studio 无法启动
+
+确保安装了正确版本：
+```bash
+pip install "langgraph-cli[inmem]"
+langgraph dev --host 0.0.0.0 --port 2024
+```
 
 ## 许可证
 

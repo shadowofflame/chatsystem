@@ -2,7 +2,7 @@ import axios from 'axios';
 
 const apiClient = axios.create({
   baseURL: '/api',
-  timeout: 60000,
+  timeout: 180000,  // 3分钟，支持深度思考
   headers: {
     'Content-Type': 'application/json',
   },
@@ -77,12 +77,18 @@ export const chatApi = {
    * @param {string} message - 消息内容
    * @param {string} sessionId - 会话ID
    * @param {boolean} enableWebSearch - 是否启用联网搜索
+   * @param {boolean} deepThink - 是否启用深度思考(TOT)
+   * @param {number} thoughtBranches - 思考分支数量
+   * @param {number} thoughtDepth - 思考深度
    */
-  sendMessage: async (message, sessionId = 'default', enableWebSearch = false) => {
+  sendMessage: async (message, sessionId = 'default', enableWebSearch = false, deepThink = false, thoughtBranches = 3, thoughtDepth = 2) => {
     const response = await apiClient.post('/chat', {
       message,
       sessionId,
       enableWebSearch,
+      deepThink,
+      thoughtBranches,
+      thoughtDepth,
     });
     return response;
   },

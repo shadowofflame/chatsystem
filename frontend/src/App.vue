@@ -252,6 +252,17 @@
                   联网搜索
                 </span>
               </label>
+              <label class="toggle-switch" title="启用深度思考(TOT)进行多分支推理">
+                <input type="checkbox" v-model="deepThink">
+                <span class="toggle-slider deep-think-slider"></span>
+                <span class="toggle-label">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                    <circle cx="12" cy="12" r="3"></circle>
+                    <path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"></path>
+                  </svg>
+                  深度思考
+                </span>
+              </label>
             </div>
             
             <!-- 已上传文件显示 -->
@@ -652,6 +663,9 @@ export default {
     const fileInput = ref(null);
     const toast = ref({ show: false, message: '', type: 'info' });
     const enableWebSearch = ref(false);  // 联网搜索开关
+    const deepThink = ref(false);  // 深度思考开关(TOT)
+    const thoughtBranches = ref(3);  // 思考分支数量
+    const thoughtDepth = ref(2);  // 思考深度
     
     // 会话统计相关
     const showSessionStatsModal = ref(false);
@@ -1042,6 +1056,10 @@ export default {
       if (uploadedFile.value && uploadedFilePath.value) {
         displayContent = `📎 [${uploadedFile.value.name}] ${content}`;
         actualContent = `请分析文件 ${uploadedFilePath.value} 的内容，然后回答以下问题：${content}`;
+      } else if (deepThink.value && enableWebSearch.value) {
+        displayContent = `🧠🌐 ${content}`;
+      } else if (deepThink.value) {
+        displayContent = `🧠 ${content}`;
       } else if (enableWebSearch.value) {
         displayContent = `🌐 ${content}`;
       }
@@ -1062,7 +1080,7 @@ export default {
 
       try {
         // 发送请求时传入联网搜索参数
-        const response = await chatApi.sendMessage(actualContent, currentSessionId.value, enableWebSearch.value);
+        const response = await chatApi.sendMessage(actualContent, currentSessionId.value, enableWebSearch.value, deepThink.value, thoughtBranches.value, thoughtDepth.value);
         if (response.success && response.data) {
           messages.value.push({
             role: 'assistant',
@@ -1465,6 +1483,9 @@ export default {
       chatHistory,
       historyLoading,
       enableWebSearch,  // 联网搜索开关
+      deepThink,  // 深度思考开关(TOT)
+      thoughtBranches,
+      thoughtDepth,
       // 文件上传
       uploadedFile,
       isUploading,
@@ -2001,6 +2022,10 @@ export default {
   background: #4CAF50;
 }
 
+.toggle-switch input:checked + .toggle-slider.deep-think-slider {
+  background: #FF9800;
+}
+
 .toggle-switch input:checked + .toggle-slider::after {
   transform: translateX(16px);
 }
@@ -2020,6 +2045,10 @@ export default {
 
 .toggle-switch input:checked ~ .toggle-label {
   color: #4CAF50;
+}
+
+.toggle-switch input:checked + .toggle-slider.deep-think-slider ~ .toggle-label {
+  color: #FF9800;
 }
 
 .toggle-switch input:checked ~ .toggle-label svg {

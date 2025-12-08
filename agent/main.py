@@ -1,9 +1,12 @@
 """
 FastAPI Agent Server
 提供 HTTP API 接口供 Java 后端调用
+支持 --stdio 模式启用 LangGraph STDIO
 """
 
 import os
+import sys
+import argparse
 from typing import Optional, List
 from contextlib import asynccontextmanager
 
@@ -87,6 +90,9 @@ class ChatRequest(BaseModel):
     message: str = Field(..., description="用户消息")
     session_id: str = Field(default="default", description="会话ID")
     enable_web_search: bool = Field(default=False, description="是否启用联网搜索")
+    deep_think: bool = Field(default=False, description="是否启用深度思考(TOT)")
+    thought_branches: int = Field(default=3, description="思考分支数量")
+    thought_depth: int = Field(default=2, description="思考深度")
 
 
 class ChatResponse(BaseModel):
@@ -154,9 +160,19 @@ async def chat(request: ChatRequest):
         try:
             # 如果启用联网搜索，使用带搜索的方法
             if request.enable_web_search:
-                response = langgraph_agent.chat_with_search(request.message)
+                response = langgraph_agent.chat_with_search(
+                    request.message,
+                    deep_think=request.deep_think,
+                    max_branches=request.thought_branches,
+                    max_depth=request.thought_depth
+                )
             else:
-                response = langgraph_agent.chat(request.message)
+                response = langgraph_agent.chat(
+                    request.message,
+                    deep_think=request.deep_think,
+                    max_branches=request.thought_branches,
+                    max_depth=request.thought_depth
+                )
             return ChatResponse(
                 response=response,
                 session_id=request.session_id
@@ -462,11 +478,179 @@ async def list_uploaded_files():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-if __name__ == "__main__":
-    port = int(os.getenv("AGENT_PORT", "8000"))
+def run_stdio_mode(args):
+    """运行 LangGraph STDIO 模式（纯命令行，不启动HTTP服务）"""
+    print("🚀 启动 LangGraph STDIO 模式...")
+    
+    agent = LangGraphAgent(
+        model=args.model,
+        memory_dir=args.memory,
+        workspace_dir=args.workspace,
+        default_branches=args.branches,
+        default_depth=args.depth,
+    )
+    
+    sys.stdout.write("LangGraph STDIO ready. Type your message and press Enter.\n")
+    sys.stdout.flush()
+    
+    for line in sys.stdin:
+        message = line.strip()
+        if not message:
+            continue
+        if message.lower() in ('exit', 'quit', 'q'):
+            print("Goodbye!")
+            break
+        try:
+            reply = agent.chat(
+                message,
+                deep_think=args.deep,
+                max_branches=args.branches,
+                max_depth=args.depth,
+            )
+        except Exception as exc:
+            reply = f"error: {exc}"
+        sys.stdout.write(reply + "\n")
+        sys.stdout.flush()
+
+
+def run_hybrid_mode(args):
+    """
+    混合模式：同时运行 HTTP API 服务和 STDIO 交互
+    - HTTP API 在后台线程运行，供 Java 后端调用
+    - STDIO 在主线程运行，可以直接命令行交互
+    """
+    import threading
+    import time
+    
+    print("🚀 启动混合模式 (HTTP API + STDIO)...")
+    print(f"   HTTP API: http://localhost:{args.port}")
+    print(f"   深度思考: {'开启' if args.deep else '关闭'}")
+    
+    # 在后台线程启动 HTTP 服务
+    def start_api():
+        uvicorn.run(
+            "main:app",
+            host="0.0.0.0",
+            port=args.port,
+            reload=False,  # 混合模式下不能用 reload
+            log_level="warning"  # 减少日志干扰
+        )
+    
+    api_thread = threading.Thread(target=start_api, daemon=True)
+    api_thread.start()
+    
+    # 等待 API 启动
+    time.sleep(3)
+    print(f"\n✅ HTTP API 已在后台运行 (端口 {args.port})")
+    print("💬 STDIO 交互已就绪，输入消息后回车发送，输入 'quit' 退出\n")
+    
+    # 使用全局的 langgraph_agent（由 FastAPI lifespan 初始化）
+    # 但这里需要单独创建一个，因为 lifespan 在另一个线程
+    agent = LangGraphAgent(
+        model=args.model,
+        memory_dir=args.memory,
+        workspace_dir=args.workspace,
+        default_branches=args.branches,
+        default_depth=args.depth,
+    )
+    
+    # STDIO 交互循环
+    try:
+        while True:
+            try:
+                message = input("You: ").strip()
+            except EOFError:
+                break
+            
+            if not message:
+                continue
+            if message.lower() in ('exit', 'quit', 'q'):
+                print("Goodbye!")
+                break
+            
+            try:
+                reply = agent.chat(
+                    message,
+                    deep_think=args.deep,
+                    max_branches=args.branches,
+                    max_depth=args.depth,
+                )
+                print(f"Agent: {reply}\n")
+            except Exception as exc:
+                print(f"Error: {exc}\n")
+    except KeyboardInterrupt:
+        print("\nGoodbye!")
+
+
+def run_api_mode(port: int):
+    """运行 FastAPI HTTP 模式"""
+    print(f"🚀 启动 FastAPI HTTP 模式，端口: {port}")
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
         port=port,
         reload=True
     )
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Chatbot Agent - 支持 HTTP API、STDIO 和混合模式"
+    )
+    parser.add_argument(
+        "--stdio", 
+        action="store_true", 
+        help="纯 STDIO 模式（不启动 HTTP 服务）"
+    )
+    parser.add_argument(
+        "--hybrid", 
+        action="store_true", 
+        help="混合模式：同时运行 HTTP API 和 STDIO 交互"
+    )
+    parser.add_argument(
+        "--port", 
+        type=int, 
+        default=int(os.getenv("AGENT_PORT", "8000")), 
+        help="HTTP API 端口 (默认: 8000)"
+    )
+    parser.add_argument(
+        "--deep", 
+        action="store_true", 
+        help="启用深度思考 (Tree-of-Thought)"
+    )
+    parser.add_argument(
+        "--branches", 
+        type=int, 
+        default=3, 
+        help="思考分支数量 (默认: 3)"
+    )
+    parser.add_argument(
+        "--depth", 
+        type=int, 
+        default=2, 
+        help="思考深度 (默认: 2)"
+    )
+    parser.add_argument(
+        "--model", 
+        default="deepseek-chat", 
+        help="模型名称 (默认: deepseek-chat)"
+    )
+    parser.add_argument(
+        "--workspace", 
+        default="./workspace", 
+        help="工作区目录 (默认: ./workspace)"
+    )
+    parser.add_argument(
+        "--memory", 
+        default="./chat_memory_db", 
+        help="记忆存储目录 (默认: ./chat_memory_db)"
+    )
+    
+    args = parser.parse_args()
+    
+    if args.stdio:
+        run_stdio_mode(args)
+    elif args.hybrid:
+        run_hybrid_mode(args)
+    else:
+        run_api_mode(args.port)

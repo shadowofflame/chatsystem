@@ -25,13 +25,16 @@ public class PythonAgentService {
      */
     public ChatResponse chat(ChatRequest request) {
         try {
-            log.debug("Sending chat request to Python Agent: {}, enableWebSearch: {}", 
-                    request.getMessage(), request.getEnableWebSearch());
+            log.debug("Sending chat request to Python Agent: {}, enableWebSearch: {}, deepThink: {}", 
+                    request.getMessage(), request.getEnableWebSearch(), request.getDeepThink());
             
             Map<String, Object> requestBody = new java.util.HashMap<>();
             requestBody.put("message", request.getMessage());
             requestBody.put("session_id", request.getSessionId() != null ? request.getSessionId() : "default");
             requestBody.put("enable_web_search", request.getEnableWebSearch() != null && request.getEnableWebSearch());
+            requestBody.put("deep_think", request.getDeepThink() != null && request.getDeepThink());
+            requestBody.put("thought_branches", request.getThoughtBranches() != null ? request.getThoughtBranches() : 3);
+            requestBody.put("thought_depth", request.getThoughtDepth() != null ? request.getThoughtDepth() : 2);
             
             Map<String, Object> response = pythonAgentWebClient.post()
                     .uri("/api/chat")

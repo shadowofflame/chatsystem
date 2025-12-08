@@ -1,29 +1,50 @@
-# LangChain 核心
-langchain>=0.1.0
-langchain-community>=0.0.10
-langchain-openai>=0.0.5
+# LangChain 核心 (Python 3.11+ 兼容)
+langchain>=0.2.5,<1.0.0
+langchain-community>=0.2.5,<1.0.0
+langchain-openai>=0.1.7,<1.0.0
+langchain-core>=0.2.5,<1.0.0
 
-# LangGraph
-langgraph>=0.0.20
+# LangGraph (支持 STDIO 和 Studio)
+langgraph>=0.2.21
+langgraph-cli[inmem]>=0.4.0
+langgraph-sdk>=0.1.11
 
 # 向量数据库
-chromadb>=0.4.0
+chromadb>=0.5.4,<2.0.0
 
-# 嵌入模型
-sentence-transformers>=2.2.0
+# 嵌入模型 (锁定版本避免 PyTorch meta tensor 问题)
+sentence-transformers>=3.0.1,<4.0.0
+torch>=2.6.0,<2.7.0
+
+# OpenTelemetry (锁定版本避免依赖冲突)
+opentelemetry-api==1.38.0
+opentelemetry-sdk==1.38.0
+opentelemetry-proto==1.38.0
+opentelemetry-exporter-otlp-proto-common==1.38.0
+opentelemetry-exporter-otlp-proto-grpc==1.38.0
+opentelemetry-exporter-otlp-proto-http==1.38.0
+opentelemetry-semantic-conventions==0.59b0
 
 # 环境变量
-python-dotenv>=1.0.0
+python-dotenv>=1.0.1
 
 # 其他工具
-tiktoken>=0.5.0
+tiktoken>=0.7.0
 
 # 网络搜索和爬虫
-beautifulsoup4>=4.12.0
-duckduckgo-search>=3.9.0
-requests>=2.31.0
+beautifulsoup4>=4.12.3
+duckduckgo-search>=6.2.0
+requests>=2.32.3
 
 # FastAPI 服务
-fastapi>=0.109.0
-uvicorn[standard]>=0.27.0
-pydantic>=2.0.0
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.8.0
+
+# MCP 支持 (Model Context Protocol)
+mcp>=1.0.0
+
+# 异步支持
+aiohttp>=3.9.5
+httpx>=0.27.0
+

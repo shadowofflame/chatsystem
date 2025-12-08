@@ -15,6 +15,7 @@ from langchain_core.output_parsers import StrOutputParser
 
 from tools import FileHandler, WebSearcher, Calculator
 from memory_store import MemoryStore
+from tot_reasoner import TreeOfThoughtReasoner
 
 
 class AgentState(TypedDict):
@@ -29,6 +30,9 @@ class AgentState(TypedDict):
     needs_web_search: bool  # 是否需要网络搜索
     needs_file_operation: bool  # 是否需要文件操作
     needs_calculation: bool  # 是否需要计算
+    deep_think: bool  # 是否启用深度思考(TOT)
+    thought_branches: int  # 分支数量
+    thought_depth: int  # 深度
 
 
 class LangGraphAgent:
@@ -52,7 +56,9 @@ class LangGraphAgent:
         base_url: str = None,
         model: str = "deepseek-chat",
         memory_dir: str = "./memory_db",
-        workspace_dir: str = "./workspace"
+        workspace_dir: str = "./workspace",
+        default_branches: int = 3,
+        default_depth: int = 2
     ):
         """
         初始化 LangGraph Agent
@@ -81,6 +87,11 @@ class LangGraphAgent:
         self.file_handler = FileHandler(workspace_dir)
         self.web_searcher = WebSearcher()
         self.calculator = Calculator()
+        self.tot_reasoner = TreeOfThoughtReasoner(
+            llm=self.llm,
+            default_branches=default_branches,
+            default_depth=default_depth
+        )
         
         # 初始化记忆
         self.memory_store = MemoryStore(persist_directory=memory_dir)
@@ -90,12 +101,22 @@ class LangGraphAgent:
         self.app = self.graph.compile()
     
     def _build_graph(self) -> StateGraph:
-        """构建 LangGraph 状态图"""
+        """
+        构建 LangGraph 状态图
+        
+        流程:
+        1. 入口节点 check_deep_think 判断是否启用深度思考
+        2. 如果启用深度思考 → 直接进入 deep_think_flow（检索记忆 + TOT）
+        3. 如果普通模式 → 走 analyze_intent 意图分析流程
+        """
         
         workflow = StateGraph(AgentState)
         
         # 添加节点
-        workflow.add_node("analyze_intent", self._analyze_intent)  # 意图分析
+        workflow.add_node("check_deep_think", self._check_deep_think)  # 入口：检查是否深度思考
+        workflow.add_node("retrieve_memory_for_tot", self._retrieve_memory)  # 深度思考前的记忆检索
+        workflow.add_node("deep_think", self._deep_think)  # 深度思考(TOT)
+        workflow.add_node("analyze_intent", self._analyze_intent)  # 意图分析（普通模式）
         workflow.add_node("retrieve_memory", self._retrieve_memory)  # 检索记忆
         workflow.add_node("web_search", self._web_search)  # 网络搜索
         workflow.add_node("file_operation", self._file_operation)  # 文件操作
@@ -103,10 +124,24 @@ class LangGraphAgent:
         workflow.add_node("generate_response", self._generate_response)  # 生成响应
         workflow.add_node("save_memory", self._save_memory)  # 保存记忆
         
-        # 设置入口
-        workflow.set_entry_point("analyze_intent")
+        # 设置入口：首先检查是否深度思考
+        workflow.set_entry_point("check_deep_think")
         
-        # 添加条件边：根据意图路由
+        # 入口路由：深度思考 vs 普通模式
+        workflow.add_conditional_edges(
+            "check_deep_think",
+            self._route_entry,
+            {
+                "deep_think": "retrieve_memory_for_tot",  # 深度思考：先检索记忆
+                "normal": "analyze_intent"  # 普通模式：走意图分析
+            }
+        )
+        
+        # 深度思考流程：检索记忆 → TOT → 保存
+        workflow.add_edge("retrieve_memory_for_tot", "deep_think")
+        workflow.add_edge("deep_think", "save_memory")
+        
+        # 普通模式：意图分析后路由
         workflow.add_conditional_edges(
             "analyze_intent",
             self._route_decision,
@@ -119,21 +154,34 @@ class LangGraphAgent:
             }
         )
         
-        # 从记忆检索到响应生成
+        # 普通模式各节点 → 生成响应
         workflow.add_edge("retrieve_memory", "generate_response")
-        
-        # 从工具节点到响应生成
         workflow.add_edge("web_search", "generate_response")
         workflow.add_edge("file_operation", "generate_response")
         workflow.add_edge("calculate", "generate_response")
         
-        # 从响应生成到保存记忆
+        # 生成响应 → 保存记忆
         workflow.add_edge("generate_response", "save_memory")
         
-        # 从保存记忆到结束
+        # 保存记忆 → 结束
         workflow.add_edge("save_memory", END)
         
         return workflow
+    
+    def _check_deep_think(self, state: AgentState) -> AgentState:
+        """入口节点：检查是否启用深度思考"""
+        deep_think = state.get("deep_think", False)
+        if deep_think:
+            print("🧠 检测到深度思考模式，将使用 Tree-of-Thought 推理")
+        else:
+            print("💬 普通对话模式")
+        return state
+    
+    def _route_entry(self, state: AgentState) -> Literal["deep_think", "normal"]:
+        """入口路由：根据 deep_think 参数决定走哪条路径"""
+        if state.get("deep_think", False):
+            return "deep_think"
+        return "normal"
     
     def _analyze_intent(self, state: AgentState) -> AgentState:
         """
@@ -325,8 +373,43 @@ class LangGraphAgent:
         
         return state
     
+    def _deep_think(self, state: AgentState) -> AgentState:
+        """深度思考节点 - 使用 Tree-of-Thought 进行多分支推理"""
+        user_input = state["user_input"]
+        memory_context = state.get("memory_context", "")
+        tool_results = state.get("tool_results", [])
+        thought_branches = state.get("thought_branches", 3)
+        thought_depth = state.get("thought_depth", 2)
+        
+        # 构建上下文
+        context_parts = []
+        if memory_context:
+            context_parts.append(memory_context)
+        if tool_results:
+            for result in tool_results:
+                context_parts.append(f"\n【{result['type']}工具结果】\n{result['content']}")
+        full_context = "\n".join(context_parts)
+        
+        print("🧠 深度思考模式 (Tree-of-Thought)")
+        print(f"   分支数: {thought_branches}, 深度: {thought_depth}")
+        
+        try:
+            response = self.tot_reasoner.solve(
+                problem=user_input,
+                context=full_context,
+                max_branches=thought_branches,
+                max_depth=thought_depth
+            )
+            state["final_response"] = response
+            print("✅ 深度思考完成")
+        except Exception as e:
+            state["final_response"] = f"深度思考失败: {str(e)}"
+            print(f"❌ 深度思考失败: {e}")
+        
+        return state
+    
     def _generate_response(self, state: AgentState) -> AgentState:
-        """生成最终响应"""
+        """生成最终响应（普通模式）"""
         user_input = state["user_input"]
         memory_context = state.get("memory_context", "")
         tool_results = state.get("tool_results", [])
@@ -343,7 +426,6 @@ class LangGraphAgent:
         
         full_context = "\n".join(context_parts)
         
-        # 生成响应
         response_prompt = ChatPromptTemplate.from_messages([
             ("system", """你是一个智能助手。根据提供的上下文信息回答用户问题。
 
@@ -386,7 +468,7 @@ class LangGraphAgent:
         
         return state
     
-    def chat(self, user_input: str) -> str:
+    def chat(self, user_input: str, deep_think: bool = False, max_branches: int = 3, max_depth: int = 2) -> str:
         """
         处理用户输入
         
@@ -407,7 +489,10 @@ class LangGraphAgent:
             "final_response": "",
             "needs_web_search": False,
             "needs_file_operation": False,
-            "needs_calculation": False
+            "needs_calculation": False,
+            "deep_think": deep_think,
+            "thought_branches": max_branches,
+            "thought_depth": max_depth
         }
         
         # 运行状态图
@@ -419,7 +504,7 @@ class LangGraphAgent:
         
         return final_state["final_response"]
     
-    def chat_with_search(self, user_input: str) -> str:
+    def chat_with_search(self, user_input: str, deep_think: bool = False, max_branches: int = 3, max_depth: int = 2) -> str:
         """
         强制使用联网搜索处理用户输入
         
@@ -457,9 +542,24 @@ class LangGraphAgent:
             for i, memory in enumerate(relevant_memories, 1):
                 memory_context += f"{i}. {memory['content']}\n"
         
-        # 生成响应
-        response_prompt = ChatPromptTemplate.from_messages([
-            ("system", """你是一个智能助手，能够利用网络搜索结果回答用户问题。
+        if deep_think:
+            print("🧠 深度思考模式 (搜索+TOT)")
+            try:
+                response = self.tot_reasoner.solve(
+                    problem=user_input,
+                    context=results_text + memory_context,
+                    max_branches=max_branches,
+                    max_depth=max_depth
+                )
+                self.memory_store.add_memory(user_input, response)
+                return response
+            except Exception as e:
+                error_msg = f"深度思考失败: {str(e)}"
+                print(f"❌ 错误: {error_msg}")
+                return error_msg
+        else:
+            response_prompt = ChatPromptTemplate.from_messages([
+                ("system", """你是一个智能助手，能够利用网络搜索结果回答用户问题。
 
 要求:
 1. 基于搜索结果回答问题
@@ -469,28 +569,28 @@ class LangGraphAgent:
 5. 回答要准确、有帮助
 
 {context}"""),
-            ("human", "{input}")
-        ])
-        
-        chain = response_prompt | self.llm | StrOutputParser()
-        
-        try:
-            response = chain.invoke({
-                "context": results_text + memory_context,
-                "input": user_input
-            })
-            print(f"✅ 生成响应完成")
+                ("human", "{input}")
+            ])
             
-            # 保存到长期记忆
-            self.memory_store.add_memory(user_input, response)
-            print(f"💾 保存记忆完成")
+            chain = response_prompt | self.llm | StrOutputParser()
             
-            return response
-            
-        except Exception as e:
-            error_msg = f"抱歉，生成响应时出错: {str(e)}"
-            print(f"❌ 错误: {error_msg}")
-            return error_msg
+            try:
+                response = chain.invoke({
+                    "context": results_text + memory_context,
+                    "input": user_input
+                })
+                print(f"✅ 生成响应完成")
+                
+                # 保存到长期记忆
+                self.memory_store.add_memory(user_input, response)
+                print(f"💾 保存记忆完成")
+                
+                return response
+                
+            except Exception as e:
+                error_msg = f"抱歉，生成响应时出错: {str(e)}"
+                print(f"❌ 错误: {error_msg}")
+                return error_msg
     
     def get_memory_stats(self):
         """获取记忆统计"""
