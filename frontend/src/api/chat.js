@@ -2,7 +2,7 @@ import axios from 'axios';
 
 const apiClient = axios.create({
   baseURL: '/api',
-  timeout: 180000,  // 3分钟，支持深度思考
+  timeout: 300000,  // 5分钟，支持深度思考
   headers: {
     'Content-Type': 'application/json',
   },
@@ -73,7 +73,7 @@ export const authApi = {
 // 聊天 API
 export const chatApi = {
   /**
-   * 发送聊天消息
+   * 发送聊天消息（非流式）
    * @param {string} message - 消息内容
    * @param {string} sessionId - 会话ID
    * @param {boolean} enableWebSearch - 是否启用联网搜索
@@ -81,7 +81,7 @@ export const chatApi = {
    * @param {number} thoughtBranches - 思考分支数量
    * @param {number} thoughtDepth - 思考深度
    */
-  sendMessage: async (message, sessionId = 'default', enableWebSearch = false, deepThink = false, thoughtBranches = 3, thoughtDepth = 2) => {
+  sendMessage: async (message, sessionId = 'default', enableWebSearch = false, deepThink = false, thoughtBranches = 5, thoughtDepth = 3) => {
     const response = await apiClient.post('/chat', {
       message,
       sessionId,
@@ -91,6 +91,99 @@ export const chatApi = {
       thoughtDepth,
     });
     return response;
+  },
+
+  /**
+   * 流式发送聊天消息 (SSE)
+   * @param {string} message - 消息内容
+   * @param {string} sessionId - 会话ID
+   * @param {boolean} enableWebSearch - 是否启用联网搜索
+   * @param {boolean} deepThink - 是否启用深度思考(TOT)
+   * @param {number} thoughtBranches - 思考分支数量
+   * @param {number} thoughtDepth - 思考深度
+   * @param {Function} onEvent - 事件回调函数
+   * @returns {Promise<void>}
+   */
+  sendMessageStream: async (message, sessionId = 'default', enableWebSearch = false, deepThink = false, thoughtBranches = 5, thoughtDepth = 3, onEvent) => {
+    const token = localStorage.getItem('token');
+    
+    const response = await fetch('/api/chat/stream', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': token ? `Bearer ${token}` : '',
+      },
+      body: JSON.stringify({
+        message,
+        sessionId,
+        enableWebSearch,
+        deepThink,
+        thoughtBranches,
+        thoughtDepth,
+      }),
+    });
+
+    if (!response.ok) {
+      if (response.status === 401 || response.status === 403) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        window.location.reload();
+      }
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    console.log('SSE stream started');  // 调试
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        console.log('SSE stream ended');  // 调试
+        break;
+      }
+
+      const chunk = decoder.decode(value, { stream: true });
+      console.log('Raw chunk received:', chunk);  // 调试：查看原始数据
+      buffer += chunk;
+      
+      // 解析 SSE 数据
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || ''; // 保留不完整的行
+      
+      for (const line of lines) {
+        // 处理可能的双重 data: 前缀 (后端透传 Agent 数据导致)
+        let processedLine = line;
+        // 移除重复的 data: 前缀
+        while (processedLine.startsWith('data:data:')) {
+          processedLine = 'data:' + processedLine.slice(10);
+        }
+        
+        if (processedLine.startsWith('data: ') || processedLine.startsWith('data:')) {
+          // 提取 JSON 数据部分
+          let data = processedLine.startsWith('data: ') 
+            ? processedLine.slice(6).trim() 
+            : processedLine.slice(5).trim();
+          
+          if (data) {
+            try {
+              const event = JSON.parse(data);
+              console.log('Parsed event:', event);  // 调试
+              if (onEvent) {
+                onEvent(event);
+              }
+            } catch (e) {
+              // 可能是空行或非 JSON 数据，忽略
+              if (data.length > 0 && !data.startsWith('data:')) {
+                console.warn('Failed to parse SSE event:', data, e);
+              }
+            }
+          }
+        }
+      }
+    }
   },
 
   /**

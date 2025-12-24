@@ -8,6 +8,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.time.LocalDateTime;
@@ -33,8 +34,8 @@ public class PythonAgentService {
             requestBody.put("session_id", request.getSessionId() != null ? request.getSessionId() : "default");
             requestBody.put("enable_web_search", request.getEnableWebSearch() != null && request.getEnableWebSearch());
             requestBody.put("deep_think", request.getDeepThink() != null && request.getDeepThink());
-            requestBody.put("thought_branches", request.getThoughtBranches() != null ? request.getThoughtBranches() : 3);
-            requestBody.put("thought_depth", request.getThoughtDepth() != null ? request.getThoughtDepth() : 2);
+            requestBody.put("thought_branches", request.getThoughtBranches() != null ? request.getThoughtBranches() : 5);
+            requestBody.put("thought_depth", request.getThoughtDepth() != null ? request.getThoughtDepth() : 3);
             
             Map<String, Object> response = pythonAgentWebClient.post()
                     .uri("/api/chat")
@@ -47,8 +48,16 @@ public class PythonAgentService {
                 String message = (String) response.get("response");
                 String sessionId = (String) response.get("session_id");
                 
-                log.debug("Received response from Python Agent: {}", message);
-                return ChatResponse.success(message, sessionId);
+                // 获取 TOT 思考过程相关字段
+                String thinkingProcess = (String) response.getOrDefault("thinking_process", "");
+                Double totScore = response.get("tot_score") != null ? 
+                        ((Number) response.get("tot_score")).doubleValue() : 0.0;
+                Boolean deepThink = (Boolean) response.getOrDefault("deep_think", false);
+                
+                log.debug("Received response from Python Agent: {}, deepThink: {}, totScore: {}", 
+                        message, deepThink, totScore);
+                
+                return ChatResponse.successWithThinking(message, sessionId, thinkingProcess, totScore, deepThink);
             }
             
             return ChatResponse.error("Empty response from agent");
@@ -173,5 +182,50 @@ public class PythonAgentService {
             log.error("Error calling summarize API", e);
             return text.length() > 20 ? text.substring(0, 20) + "..." : text;
         }
+    }
+    
+    /**
+     * 流式对话 - 返回 SSE 事件流
+     * 使用 DataBuffer 逐块转发，保持原始格式
+     */
+    public Flux<String> chatStream(ChatRequest request) {
+        log.info("Starting streaming chat request: {}, enableWebSearch: {}, deepThink: {}", 
+                request.getMessage(), request.getEnableWebSearch(), request.getDeepThink());
+        
+        Map<String, Object> requestBody = new java.util.HashMap<>();
+        requestBody.put("message", request.getMessage());
+        requestBody.put("session_id", request.getSessionId() != null ? request.getSessionId() : "default");
+        requestBody.put("enable_web_search", request.getEnableWebSearch() != null && request.getEnableWebSearch());
+        requestBody.put("deep_think", request.getDeepThink() != null && request.getDeepThink());
+        requestBody.put("thought_branches", request.getThoughtBranches() != null ? request.getThoughtBranches() : 5);
+        requestBody.put("thought_depth", request.getThoughtDepth() != null ? request.getThoughtDepth() : 3);
+        
+        return pythonAgentWebClient.post()
+                .uri("/api/chat/stream")
+                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .accept(org.springframework.http.MediaType.TEXT_EVENT_STREAM)
+                .bodyValue(requestBody)
+                .exchangeToFlux(response -> {
+                    if (response.statusCode().is2xxSuccessful()) {
+                        // 使用 DataBuffer 直接读取原始字节流
+                        return response.bodyToFlux(org.springframework.core.io.buffer.DataBuffer.class)
+                                .map(dataBuffer -> {
+                                    byte[] bytes = new byte[dataBuffer.readableByteCount()];
+                                    dataBuffer.read(bytes);
+                                    org.springframework.core.io.buffer.DataBufferUtils.release(dataBuffer);
+                                    String chunk = new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
+                                    log.debug("Received chunk from Agent: {} bytes", bytes.length);
+                                    return chunk;
+                                });
+                    } else {
+                        log.error("Python Agent error: {}", response.statusCode());
+                        return Flux.just("data: {\"type\":\"error\",\"content\":\"Agent error\"}\n\n");
+                    }
+                })
+                .onErrorResume(error -> {
+                    log.error("Stream error: {}", error.getMessage());
+                    return Flux.just("data: {\"type\":\"error\",\"content\":\"" + error.getMessage().replace("\"", "'") + "\"}\n\n");
+                })
+                .doOnComplete(() -> log.info("Stream completed"));
     }
 }

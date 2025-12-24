@@ -208,6 +208,17 @@
                   </svg>
                 </div>
                 <div class="message-content">
+                  <!-- TOT 思考过程折叠区域 -->
+                  <div v-if="msg.role === 'assistant' && msg.thinkingProcess" class="thinking-process">
+                    <details>
+                      <summary class="thinking-header">
+                        <span class="thinking-icon">🧠</span>
+                        <span>思考过程</span>
+                        <span v-if="msg.totScore" class="thinking-score">得分: {{ msg.totScore.toFixed(2) }}</span>
+                      </summary>
+                      <pre class="thinking-content">{{ msg.thinkingProcess }}</pre>
+                    </details>
+                  </div>
                   <div class="message-bubble" v-html="formatMessage(msg.content)"></div>
                   <div class="message-meta">
                     <span class="message-time">{{ formatTime(msg.timestamp) }}</span>
@@ -218,15 +229,37 @@
                 </div>
               </div>
 
-              <!-- 加载中 -->
-              <div v-if="isLoading" class="message assistant fade-in">
+              <!-- 流式输出中 - 实时显示 -->
+              <div v-if="isStreaming" class="message assistant fade-in streaming-message">
                 <div class="message-avatar">
                   <svg viewBox="0 0 24 24" fill="currentColor">
                     <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
                   </svg>
                 </div>
                 <div class="message-content">
-                  <div class="message-bubble typing">
+                  <!-- 状态信息 -->
+                  <div v-if="streamingStatus" class="streaming-status">
+                    <span class="status-indicator"></span>
+                    {{ streamingStatus }}
+                  </div>
+                  
+                  <!-- 实时思考过程 -->
+                  <div v-if="streamingThinking" class="thinking-process streaming">
+                    <details open>
+                      <summary class="thinking-header">
+                        <span class="thinking-icon">🧠</span>
+                        <span>思考过程 (实时)</span>
+                        <span v-if="streamingTotScore > 0" class="thinking-score">得分: {{ streamingTotScore.toFixed(2) }}</span>
+                      </summary>
+                      <pre class="thinking-content">{{ streamingThinking }}</pre>
+                    </details>
+                  </div>
+                  
+                  <!-- 实时响应内容 - 流式时直接显示文本，更流畅 -->
+                  <div v-if="streamingResponse" class="message-bubble streaming-text">{{ streamingResponse }}<span class="cursor">▌</span></div>
+                  
+                  <!-- 加载动画 (当没有内容时显示) -->
+                  <div v-if="!streamingThinking && !streamingResponse" class="message-bubble typing">
                     <span class="dot"></span>
                     <span class="dot"></span>
                     <span class="dot"></span>
@@ -664,8 +697,15 @@ export default {
     const toast = ref({ show: false, message: '', type: 'info' });
     const enableWebSearch = ref(false);  // 联网搜索开关
     const deepThink = ref(false);  // 深度思考开关(TOT)
-    const thoughtBranches = ref(3);  // 思考分支数量
-    const thoughtDepth = ref(2);  // 思考深度
+    const thoughtBranches = ref(5);  // 思考分支数量
+    const thoughtDepth = ref(3);  // 思考深度
+    
+    // 流式输出相关
+    const isStreaming = ref(false);  // 是否正在流式输出
+    const streamingThinking = ref('');  // 实时思考过程
+    const streamingResponse = ref('');  // 实时响应内容
+    const streamingStatus = ref('');  // 当前状态信息
+    const streamingTotScore = ref(0);  // TOT 得分
     
     // 会话统计相关
     const showSessionStatsModal = ref(false);
@@ -751,6 +791,59 @@ export default {
       setTimeout(() => {
         toast.value.show = false;
       }, 3000);
+    };
+
+    // 处理流式事件
+    const handleStreamEvent = (event) => {
+      console.log('Received SSE event:', event);  // 调试日志
+      const eventType = event.type;
+      const content = event.content || '';
+      
+      switch (eventType) {
+        case 'status':
+          streamingStatus.value = content;
+          break;
+        case 'thinking_start':
+          streamingThinking.value = content + '\n';
+          streamingStatus.value = '🧠 开始深度思考...';
+          break;
+        case 'thinking_layer':
+          streamingThinking.value += '\n' + content + '\n';
+          streamingStatus.value = content;
+          break;
+        case 'thinking_step':
+          streamingThinking.value += content + '\n';
+          break;
+        case 'thinking_score':
+          streamingThinking.value += content + '\n';
+          break;
+        case 'thinking_best':
+          streamingThinking.value += '\n' + content + '\n';
+          break;
+        case 'thinking_end':
+          streamingThinking.value += content + '\n';
+          streamingTotScore.value = event.best_score || 0;
+          streamingStatus.value = '✅ 思考完成，生成回答中...';
+          break;
+        case 'response_chunk':
+          streamingResponse.value += content;
+          streamingStatus.value = '';
+          console.log('Response so far:', streamingResponse.value);  // 调试日志
+          break;
+        case 'response_end':
+          streamingTotScore.value = event.tot_score || streamingTotScore.value;
+          streamingStatus.value = '';
+          break;
+        case 'error':
+          streamingStatus.value = '❌ ' + content;
+          showToast(content, 'error');
+          break;
+        case 'done':
+          streamingStatus.value = '';
+          break;
+        default:
+          console.log('Unknown event type:', eventType, event);
+      }
     };
 
     // 切换登录/注册模式
@@ -1076,63 +1169,70 @@ export default {
       removeUploadedFile();
       
       isLoading.value = true;
+      isStreaming.value = true;
+      streamingThinking.value = '';
+      streamingResponse.value = '';
+      streamingStatus.value = '连接中...';
+      streamingTotScore.value = 0;
       scrollToBottom();
 
       try {
-        // 发送请求时传入联网搜索参数
-        const response = await chatApi.sendMessage(actualContent, currentSessionId.value, enableWebSearch.value, deepThink.value, thoughtBranches.value, thoughtDepth.value);
-        if (response.success && response.data) {
-          messages.value.push({
-            role: 'assistant',
-            content: response.data.message,
-            timestamp: new Date().toISOString(),
-            // 费用相关信息
-            cost: response.data.cost,
-            inputCharCount: response.data.inputCharCount,
-            outputCharCount: response.data.outputCharCount,
-            totalCharCount: response.data.totalCharCount,
-          });
-          
-          // 更新余额显示
-          if (response.data.newBalance !== null && response.data.newBalance !== undefined) {
-            userBalance.value = parseFloat(response.data.newBalance);
+        // 使用流式 API
+        await chatApi.sendMessageStream(
+          actualContent, 
+          currentSessionId.value, 
+          enableWebSearch.value, 
+          deepThink.value, 
+          thoughtBranches.value, 
+          thoughtDepth.value,
+          (event) => {
+            // 处理流式事件
+            handleStreamEvent(event);
+            scrollToBottom();
           }
-          
-          // 如果是第一条消息，等待后端生成标题后重新加载会话列表
-          if (isFirstMessage) {
-            // 延迟一下确保后端已经生成标题
-            setTimeout(async () => {
-              const sessionsResponse = await historyApi.getSessions();
-              if (sessionsResponse.success && sessionsResponse.data) {
-                const updatedSession = sessionsResponse.data.find(s => s.sessionId === currentSessionId.value);
-                if (updatedSession) {
-                  // 找到当前会话并更新标题
-                  const sessionIndex = sessions.value.findIndex(s => s.sessionId === currentSessionId.value);
-                  if (sessionIndex !== -1) {
-                    sessions.value[sessionIndex].title = updatedSession.title;
-                    sessions.value[sessionIndex].lastMessageTime = updatedSession.lastMessageTime;
-                    delete sessions.value[sessionIndex].isNew;
-                  }
+        );
+        
+        // 流结束后，将消息添加到列表
+        messages.value.push({
+          role: 'assistant',
+          content: streamingResponse.value || '(无响应)',
+          timestamp: new Date().toISOString(),
+          thinkingProcess: streamingThinking.value || '',
+          totScore: streamingTotScore.value,
+          deepThink: deepThink.value,
+        });
+        
+        // 如果是第一条消息，更新会话标题
+        if (isFirstMessage) {
+          setTimeout(async () => {
+            const sessionsResponse = await historyApi.getSessions();
+            if (sessionsResponse.success && sessionsResponse.data) {
+              const updatedSession = sessionsResponse.data.find(s => s.sessionId === currentSessionId.value);
+              if (updatedSession) {
+                const sessionIndex = sessions.value.findIndex(s => s.sessionId === currentSessionId.value);
+                if (sessionIndex !== -1) {
+                  sessions.value[sessionIndex].title = updatedSession.title;
+                  sessions.value[sessionIndex].lastMessageTime = updatedSession.lastMessageTime;
+                  delete sessions.value[sessionIndex].isNew;
                 }
               }
-            }, 500); // 等待500ms让后端完成标题生成
-          } else {
-            // 更新会话列表中的最后消息时间
-            const session = sessions.value.find(s => s.sessionId === currentSessionId.value);
-            if (session) {
-              session.lastMessageTime = new Date().toISOString();
-              // 重新排序会话列表
-              sessions.value.sort((a, b) => new Date(b.lastMessageTime) - new Date(a.lastMessageTime));
             }
-          }
+          }, 500);
         } else {
-          showToast(response.message || '发送失败', 'error');
+          const session = sessions.value.find(s => s.sessionId === currentSessionId.value);
+          if (session) {
+            session.lastMessageTime = new Date().toISOString();
+            sessions.value.sort((a, b) => new Date(b.lastMessageTime) - new Date(a.lastMessageTime));
+          }
         }
       } catch (error) {
         console.error('Send message error:', error);
         showToast('发送失败，请检查网络连接', 'error');
       } finally {
         isLoading.value = false;
+        isStreaming.value = false;
+        streamingStatus.value = '';
+        scrollToBottom();
         scrollToBottom();
       }
     };
@@ -1486,6 +1586,13 @@ export default {
       deepThink,  // 深度思考开关(TOT)
       thoughtBranches,
       thoughtDepth,
+      // 流式输出
+      isStreaming,
+      streamingThinking,
+      streamingResponse,
+      streamingStatus,
+      streamingTotScore,
+      handleStreamEvent,
       // 文件上传
       uploadedFile,
       isUploading,
@@ -1890,6 +1997,138 @@ export default {
   padding: 12px 16px;
   border-radius: 16px;
   line-height: 1.5;
+}
+
+/* TOT 思考过程样式 */
+.thinking-process {
+  margin-bottom: 8px;
+  width: 100%;
+}
+
+.thinking-process details {
+  background: linear-gradient(135deg, #f0f4ff 0%, #e8f0fe 100%);
+  border-radius: 12px;
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  overflow: hidden;
+}
+
+.thinking-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  color: #4f46e5;
+  transition: background 0.2s;
+}
+
+.thinking-header:hover {
+  background: rgba(99, 102, 241, 0.1);
+}
+
+.thinking-icon {
+  font-size: 16px;
+}
+
+.thinking-score {
+  margin-left: auto;
+  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+  color: white;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.thinking-content {
+  padding: 12px 14px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #374151;
+  background: rgba(255, 255, 255, 0.7);
+  border-top: 1px solid rgba(99, 102, 241, 0.1);
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  max-height: 300px;
+  overflow-y: auto;
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', monospace;
+}
+
+.thinking-content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.thinking-content::-webkit-scrollbar-thumb {
+  background: rgba(99, 102, 241, 0.3);
+  border-radius: 3px;
+}
+
+/* 流式输出样式 */
+.streaming-message .thinking-process.streaming details {
+  border: 2px solid rgba(99, 102, 241, 0.4);
+  animation: pulse-border 2s ease-in-out infinite;
+}
+
+@keyframes pulse-border {
+  0%, 100% {
+    border-color: rgba(99, 102, 241, 0.4);
+  }
+  50% {
+    border-color: rgba(99, 102, 241, 0.8);
+  }
+}
+
+.streaming-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+  border-radius: 8px;
+  font-size: 13px;
+  color: #92400e;
+  margin-bottom: 8px;
+  animation: fadeIn 0.3s ease;
+}
+
+.status-indicator {
+  width: 8px;
+  height: 8px;
+  background: #f59e0b;
+  border-radius: 50%;
+  animation: blink 1s ease-in-out infinite;
+}
+
+@keyframes blink {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.streaming-message .message-bubble {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.streaming-message .message-bubble.streaming-text {
+  font-family: inherit;
+}
+
+.streaming-message .message-bubble .cursor {
+  animation: blink 0.8s infinite;
+  color: #6366f1;
+  font-weight: bold;
+}
+
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
 }
 
 .message.user .message-bubble {

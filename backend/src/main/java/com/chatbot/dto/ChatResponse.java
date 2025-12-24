@@ -20,6 +20,11 @@ public class ChatResponse {
     private boolean success;
     private String error;
     
+    // TOT 深度思考相关字段
+    private String thinkingProcess;     // 思考过程
+    private Double totScore;            // TOT 最佳得分
+    private Boolean deepThink;          // 是否使用了深度思考
+    
     // 费用相关字段
     private Integer inputCharCount;     // 输入字数
     private Integer outputCharCount;    // 输出字数
@@ -33,6 +38,19 @@ public class ChatResponse {
                 .sessionId(sessionId)
                 .timestamp(LocalDateTime.now())
                 .success(true)
+                .build();
+    }
+    
+    public static ChatResponse successWithThinking(String message, String sessionId, 
+            String thinkingProcess, Double totScore, Boolean deepThink) {
+        return ChatResponse.builder()
+                .message(message)
+                .sessionId(sessionId)
+                .timestamp(LocalDateTime.now())
+                .success(true)
+                .thinkingProcess(thinkingProcess)
+                .totScore(totScore)
+                .deepThink(deepThink)
                 .build();
     }
     

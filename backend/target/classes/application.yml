@@ -1,9 +1,17 @@
 server:
   port: 9090
+  # Tomcat 配置 - 优化 SSE 流式响应
+  tomcat:
+    connection-timeout: 300000
+    max-connections: 200
 
 spring:
   application:
     name: chatbot-backend
+  
+  # Reactor Netty / WebClient 配置
+  codec:
+    max-in-memory-size: 10MB
   
   # MySQL 数据库配置
   datasource:
@@ -25,7 +33,7 @@ spring:
 # Python Agent Configuration
 python-agent:
   base-url: http://localhost:8000
-  timeout: 180000  # 3分钟，支持深度思考
+  timeout: 300000  # 5分钟，支持深度思考
 
 # JWT Configuration
 jwt:
@@ -36,4 +44,6 @@ logging:
   level:
     com.chatbot: DEBUG
     org.springframework.web: INFO
-    org.springframework.security: DEBUG
+    org.springframework.security: INFO
+    # 静音 SSE 相关的无害错误日志
+    org.springframework.boot.autoconfigure.web.servlet.error.ErrorMvcAutoConfiguration: OFF

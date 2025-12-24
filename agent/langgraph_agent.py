@@ -4,7 +4,7 @@ LangGraph Agent - 智能对话代理
 """
 
 import json
-from typing import TypedDict, Annotated, Sequence, Literal
+from typing import TypedDict, Annotated, Sequence, Literal, Generator
 from datetime import datetime
 
 from langgraph.graph import StateGraph, END
@@ -15,7 +15,7 @@ from langchain_core.output_parsers import StrOutputParser
 
 from tools import FileHandler, WebSearcher, Calculator
 from memory_store import MemoryStore
-from tot_reasoner import TreeOfThoughtReasoner
+from tot_reasoner import TreeOfThoughtReasoner, StreamEvent
 
 
 class AgentState(TypedDict):
@@ -27,6 +27,8 @@ class AgentState(TypedDict):
     tool_results: list  # 工具结果列表
     memory_context: str  # 记忆上下文
     final_response: str  # 最终响应
+    thinking_process: str  # TOT 思考过程
+    tot_score: float  # TOT 最佳得分
     needs_web_search: bool  # 是否需要网络搜索
     needs_file_operation: bool  # 是否需要文件操作
     needs_calculation: bool  # 是否需要计算
@@ -57,8 +59,8 @@ class LangGraphAgent:
         model: str = "deepseek-chat",
         memory_dir: str = "./memory_db",
         workspace_dir: str = "./workspace",
-        default_branches: int = 3,
-        default_depth: int = 2
+        default_branches: int = 5,
+        default_depth: int = 3
     ):
         """
         初始化 LangGraph Agent
@@ -394,16 +396,24 @@ class LangGraphAgent:
         print(f"   分支数: {thought_branches}, 深度: {thought_depth}")
         
         try:
-            response = self.tot_reasoner.solve(
+            # solve 现在返回 dict，包含 thinking_process 和 final_answer
+            tot_result = self.tot_reasoner.solve(
                 problem=user_input,
                 context=full_context,
                 max_branches=thought_branches,
                 max_depth=thought_depth
             )
-            state["final_response"] = response
+            
+            # 将思考过程和最终答案分开存储
+            state["thinking_process"] = tot_result.get("thinking_process", "")
+            state["final_response"] = tot_result.get("final_answer", "")
+            state["tot_score"] = tot_result.get("best_score", 0.0)
+            
             print("✅ 深度思考完成")
         except Exception as e:
+            state["thinking_process"] = f"思考过程中出错: {str(e)}"
             state["final_response"] = f"深度思考失败: {str(e)}"
+            state["tot_score"] = 0.0
             print(f"❌ 深度思考失败: {e}")
         
         return state
@@ -468,15 +478,23 @@ class LangGraphAgent:
         
         return state
     
-    def chat(self, user_input: str, deep_think: bool = False, max_branches: int = 3, max_depth: int = 2) -> str:
+    def chat(self, user_input: str, deep_think: bool = False, max_branches: int = 5, max_depth: int = 3) -> dict:
         """
         处理用户输入
         
         Args:
             user_input: 用户输入
+            deep_think: 是否启用深度思考
+            max_branches: TOT 分支数
+            max_depth: TOT 深度
             
         Returns:
-            AI响应
+            dict: {
+                "response": str,           # 最终回答
+                "thinking_process": str,   # 思考过程（仅深度思考时有值）
+                "tot_score": float,        # TOT 得分（仅深度思考时有值）
+                "deep_think": bool         # 是否使用了深度思考
+            }
         """
         # 初始化状态
         initial_state = {
@@ -487,6 +505,8 @@ class LangGraphAgent:
             "tool_results": [],
             "memory_context": "",
             "final_response": "",
+            "thinking_process": "",
+            "tot_score": 0.0,
             "needs_web_search": False,
             "needs_file_operation": False,
             "needs_calculation": False,
@@ -502,17 +522,30 @@ class LangGraphAgent:
         
         final_state = self.app.invoke(initial_state)
         
-        return final_state["final_response"]
+        return {
+            "response": final_state.get("final_response", ""),
+            "thinking_process": final_state.get("thinking_process", ""),
+            "tot_score": final_state.get("tot_score", 0.0),
+            "deep_think": deep_think
+        }
     
-    def chat_with_search(self, user_input: str, deep_think: bool = False, max_branches: int = 3, max_depth: int = 2) -> str:
+    def chat_with_search(self, user_input: str, deep_think: bool = False, max_branches: int = 5, max_depth: int = 3) -> dict:
         """
         强制使用联网搜索处理用户输入
         
         Args:
             user_input: 用户输入
+            deep_think: 是否启用深度思考
+            max_branches: TOT 分支数
+            max_depth: TOT 深度
             
         Returns:
-            AI响应
+            dict: {
+                "response": str,           # 最终回答
+                "thinking_process": str,   # 思考过程（仅深度思考时有值）
+                "tot_score": float,        # TOT 得分（仅深度思考时有值）
+                "deep_think": bool         # 是否使用了深度思考
+            }
         """
         print(f"\n{'='*50}")
         print(f"📝 用户输入: {user_input}")
@@ -545,18 +578,35 @@ class LangGraphAgent:
         if deep_think:
             print("🧠 深度思考模式 (搜索+TOT)")
             try:
-                response = self.tot_reasoner.solve(
+                tot_result = self.tot_reasoner.solve(
                     problem=user_input,
                     context=results_text + memory_context,
                     max_branches=max_branches,
                     max_depth=max_depth
                 )
-                self.memory_store.add_memory(user_input, response)
-                return response
+                final_response = tot_result.get("final_answer", "")
+                thinking_process = tot_result.get("thinking_process", "")
+                tot_score = tot_result.get("best_score", 0.0)
+                
+                self.memory_store.add_memory(user_input, final_response)
+                print("✅ 深度思考完成")
+                print("💾 保存记忆完成")
+                
+                return {
+                    "response": final_response,
+                    "thinking_process": thinking_process,
+                    "tot_score": tot_score,
+                    "deep_think": True
+                }
             except Exception as e:
                 error_msg = f"深度思考失败: {str(e)}"
                 print(f"❌ 错误: {error_msg}")
-                return error_msg
+                return {
+                    "response": error_msg,
+                    "thinking_process": "",
+                    "tot_score": 0.0,
+                    "deep_think": True
+                }
         else:
             response_prompt = ChatPromptTemplate.from_messages([
                 ("system", """你是一个智能助手，能够利用网络搜索结果回答用户问题。
@@ -585,12 +635,22 @@ class LangGraphAgent:
                 self.memory_store.add_memory(user_input, response)
                 print(f"💾 保存记忆完成")
                 
-                return response
+                return {
+                    "response": response,
+                    "thinking_process": "",
+                    "tot_score": 0.0,
+                    "deep_think": False
+                }
                 
             except Exception as e:
                 error_msg = f"抱歉，生成响应时出错: {str(e)}"
                 print(f"❌ 错误: {error_msg}")
-                return error_msg
+                return {
+                    "response": error_msg,
+                    "thinking_process": "",
+                    "tot_score": 0.0,
+                    "deep_think": False
+                }
     
     def get_memory_stats(self):
         """获取记忆统计"""
@@ -669,3 +729,247 @@ class LangGraphAgent:
             return chain.invoke({})
         except Exception as e:
             return f"翻译失败: {str(e)}"
+
+    # ==================== 流式方法 ====================
+    
+    def chat_stream(self, user_input: str, deep_think: bool = False, max_branches: int = 5, max_depth: int = 3) -> Generator[dict, None, None]:
+        """
+        流式处理用户输入，边思考边输出
+        
+        Args:
+            user_input: 用户输入
+            deep_think: 是否启用深度思考
+            max_branches: TOT 分支数
+            max_depth: TOT 深度
+            
+        Yields:
+            dict: 流式事件
+        """
+        yield {"type": "status", "content": "开始处理..."}
+        
+        # 检索相关记忆
+        relevant_memories = self.memory_store.search_memories(user_input, n_results=3)
+        memory_context = ""
+        if relevant_memories:
+            memory_context = "\n\n【相关历史记忆】\n"
+            for i, memory in enumerate(relevant_memories, 1):
+                memory_context += f"{i}. {memory['content']}\n"
+            yield {"type": "status", "content": f"找到 {len(relevant_memories)} 条相关记忆"}
+        
+        if deep_think:
+            yield {"type": "status", "content": "启用深度思考模式 (Tree-of-Thought)..."}
+            
+            # 流式输出思考过程
+            final_answer = ""
+            best_score = 0.0
+            
+            for event in self.tot_reasoner.solve_stream(
+                problem=user_input,
+                context=memory_context,
+                max_branches=max_branches,
+                max_depth=max_depth
+            ):
+                # 转发 TOT 事件
+                yield event
+                
+                if event.get("type") == StreamEvent.THINKING_END:
+                    final_answer = event.get("final_answer", "")
+                    best_score = event.get("best_score", 0.0)
+            
+            # 流式输出最终响应
+            yield {"type": StreamEvent.RESPONSE_CHUNK, "content": "\n\n---\n\n**最终回答：**\n\n"}
+            
+            # 使用 LLM 流式生成最终响应
+            response_prompt = ChatPromptTemplate.from_messages([
+                ("system", """基于深度思考的结果，生成简洁清晰的回答。
+                
+思考结果: {thought}
+用户问题: {question}
+
+请直接回答用户问题，不要重复思考过程。"""),
+                ("human", "{question}")
+            ])
+            
+            chain = response_prompt | self.llm
+            
+            try:
+                for chunk in chain.stream({"thought": final_answer, "question": user_input}):
+                    if hasattr(chunk, 'content') and chunk.content:
+                        yield {"type": StreamEvent.RESPONSE_CHUNK, "content": chunk.content}
+            except Exception as e:
+                yield {"type": StreamEvent.ERROR, "content": f"生成响应失败: {str(e)}"}
+            
+            # 保存记忆
+            self.memory_store.add_memory(user_input, final_answer)
+            
+            yield {
+                "type": StreamEvent.RESPONSE_END,
+                "content": "",
+                "tot_score": best_score,
+                "deep_think": True
+            }
+        else:
+            # 普通模式：直接流式生成响应
+            yield {"type": "status", "content": "生成回答中..."}
+            
+            response_prompt = ChatPromptTemplate.from_messages([
+                ("system", """你是一个智能助手。根据提供的上下文信息回答用户问题。
+
+要求:
+1. 回答要准确、友好、有帮助
+2. 如果信息不足，诚实说明
+
+上下文信息:
+{context}"""),
+                ("human", "{input}")
+            ])
+            
+            chain = response_prompt | self.llm
+            full_response = ""
+            
+            try:
+                for chunk in chain.stream({"context": memory_context, "input": user_input}):
+                    if hasattr(chunk, 'content') and chunk.content:
+                        full_response += chunk.content
+                        yield {"type": StreamEvent.RESPONSE_CHUNK, "content": chunk.content}
+                
+                # 保存记忆
+                self.memory_store.add_memory(user_input, full_response)
+                
+                yield {
+                    "type": StreamEvent.RESPONSE_END,
+                    "content": "",
+                    "tot_score": 0.0,
+                    "deep_think": False
+                }
+            except Exception as e:
+                yield {"type": StreamEvent.ERROR, "content": f"生成响应失败: {str(e)}"}
+
+    def chat_with_search_stream(self, user_input: str, deep_think: bool = False, max_branches: int = 5, max_depth: int = 3) -> Generator[dict, None, None]:
+        """
+        流式处理联网搜索请求
+        
+        Args:
+            user_input: 用户输入
+            deep_think: 是否启用深度思考
+            max_branches: TOT 分支数
+            max_depth: TOT 深度
+            
+        Yields:
+            dict: 流式事件
+        """
+        yield {"type": "status", "content": "🌐 开始联网搜索..."}
+        
+        # 执行网络搜索
+        search_result = self.web_searcher.search(user_input, num_results=5)
+        
+        if search_result["success"]:
+            results_text = "【网络搜索结果】\n"
+            for i, result in enumerate(search_result["results"], 1):
+                results_text += f"{i}. {result['title']}\n"
+                results_text += f"   {result['snippet']}\n"
+                results_text += f"   来源: {result['link']}\n\n"
+            yield {"type": "status", "content": f"✅ 搜索成功，获取 {len(search_result['results'])} 条结果"}
+        else:
+            results_text = f"搜索未能返回结果: {search_result.get('error', '未知错误')}"
+            yield {"type": "status", "content": f"⚠️ 搜索失败: {search_result.get('error')}"}
+        
+        # 检索相关记忆
+        relevant_memories = self.memory_store.search_memories(user_input, n_results=3)
+        memory_context = ""
+        if relevant_memories:
+            memory_context = "\n\n【相关历史记忆】\n"
+            for i, memory in enumerate(relevant_memories, 1):
+                memory_context += f"{i}. {memory['content']}\n"
+        
+        full_context = results_text + memory_context
+        
+        if deep_think:
+            yield {"type": "status", "content": "🧠 启用深度思考模式 (搜索+TOT)..."}
+            
+            final_answer = ""
+            best_score = 0.0
+            
+            for event in self.tot_reasoner.solve_stream(
+                problem=user_input,
+                context=full_context,
+                max_branches=max_branches,
+                max_depth=max_depth
+            ):
+                yield event
+                
+                if event.get("type") == StreamEvent.THINKING_END:
+                    final_answer = event.get("final_answer", "")
+                    best_score = event.get("best_score", 0.0)
+            
+            yield {"type": StreamEvent.RESPONSE_CHUNK, "content": "\n\n---\n\n**最终回答：**\n\n"}
+            
+            # 使用搜索结果生成最终响应
+            response_prompt = ChatPromptTemplate.from_messages([
+                ("system", """基于网络搜索结果和深度思考，生成准确的回答。
+
+搜索结果: {search_results}
+思考结果: {thought}
+用户问题: {question}
+
+请综合信息回答，适当引用来源。"""),
+                ("human", "{question}")
+            ])
+            
+            chain = response_prompt | self.llm
+            
+            try:
+                for chunk in chain.stream({"search_results": results_text, "thought": final_answer, "question": user_input}):
+                    if hasattr(chunk, 'content') and chunk.content:
+                        yield {"type": StreamEvent.RESPONSE_CHUNK, "content": chunk.content}
+            except Exception as e:
+                yield {"type": StreamEvent.ERROR, "content": f"生成响应失败: {str(e)}"}
+            
+            self.memory_store.add_memory(user_input, final_answer)
+            
+            yield {
+                "type": StreamEvent.RESPONSE_END,
+                "content": "",
+                "tot_score": best_score,
+                "deep_think": True
+            }
+        else:
+            yield {"type": "status", "content": "生成回答中..."}
+            
+            response_prompt = ChatPromptTemplate.from_messages([
+                ("system", """你是一个智能助手，能够利用网络搜索结果回答用户问题。
+
+要求:
+1. 基于搜索结果回答问题
+2. 如有多个来源，综合信息回答
+3. 适当引用来源
+4. 如果搜索结果不足以回答问题，诚实说明
+5. 回答要准确、有帮助
+
+搜索结果:
+{search_results}
+
+历史记忆:
+{memory_context}"""),
+                ("human", "{input}")
+            ])
+            
+            chain = response_prompt | self.llm
+            full_response = ""
+            
+            try:
+                for chunk in chain.stream({"search_results": results_text, "memory_context": memory_context, "input": user_input}):
+                    if hasattr(chunk, 'content') and chunk.content:
+                        full_response += chunk.content
+                        yield {"type": StreamEvent.RESPONSE_CHUNK, "content": chunk.content}
+                
+                self.memory_store.add_memory(user_input, full_response)
+                
+                yield {
+                    "type": StreamEvent.RESPONSE_END,
+                    "content": "",
+                    "tot_score": 0.0,
+                    "deep_think": False
+                }
+            except Exception as e:
+                yield {"type": StreamEvent.ERROR, "content": f"生成响应失败: {str(e)}"}

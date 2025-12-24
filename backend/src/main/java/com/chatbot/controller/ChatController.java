@@ -12,9 +12,11 @@ import com.chatbot.service.RechargeService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
+import reactor.core.publisher.Flux;
 
 import java.math.BigDecimal;
 
@@ -141,5 +143,58 @@ public class ChatController {
         String status = agentHealthy ? "All services are healthy" : "Python Agent is not available";
         
         return ResponseEntity.ok(ApiResponse.success("status", status));
+    }
+    
+    /**
+     * 流式对话接口 (SSE)
+     * 边思考边输出，支持深度思考模式的实时显示
+     */
+    @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public ResponseEntity<Flux<String>> chatStream(
+            @Valid @RequestBody ChatRequest request,
+            Authentication authentication
+    ) {
+        String username = authentication.getName();
+        log.info("Received streaming chat request from user {}: {}", username, request.getMessage());
+        
+        // 检查用户余额
+        BigDecimal balance = rechargeService.getUserBalance(username);
+        if (balance.compareTo(BigDecimal.ZERO) <= 0) {
+            return ResponseEntity.ok()
+                    .header("Cache-Control", "no-cache")
+                    .header("X-Accel-Buffering", "no")
+                    .body(Flux.just("data: {\"type\":\"error\",\"content\":\"余额不足，请先充值\"}\n\n"));
+        }
+        
+        String sessionId = request.getSessionId() != null ? request.getSessionId() : "default";
+        
+        // 确保会话存在
+        if (chatSessionService.getUserSession(username, sessionId) == null) {
+            var newSession = chatSessionService.createSession(username, sessionId);
+            sessionId = newSession.getSessionId();
+        }
+        
+        request.setSessionId(sessionId);
+        final String finalSessionId = sessionId;
+        
+        // 调用 Python Agent 流式接口
+        Flux<String> streamFlux = pythonAgentService.chatStream(request)
+                .doOnComplete(() -> {
+                    // 流结束后更新会话
+                    chatSessionService.incrementMessageCount(finalSessionId);
+                    chatSessionService.updateSessionTitle(finalSessionId, request.getMessage());
+                    log.info("Streaming chat completed for session: {}", finalSessionId);
+                })
+                .doOnError(error -> {
+                    log.error("Streaming chat error: {}", error.getMessage());
+                });
+        
+        // 返回带有禁用缓冲头的响应
+        return ResponseEntity.ok()
+                .header("Cache-Control", "no-cache, no-store, must-revalidate")
+                .header("Pragma", "no-cache")
+                .header("X-Accel-Buffering", "no")
+                .header("Connection", "keep-alive")
+                .body(streamFlux);
     }
 }

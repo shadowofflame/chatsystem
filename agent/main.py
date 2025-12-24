@@ -2,16 +2,25 @@
 FastAPI Agent Server
 提供 HTTP API 接口供 Java 后端调用
 支持 --stdio 模式启用 LangGraph STDIO
+支持流式输出 (SSE)
 """
 
 import os
+# 禁用 tokenizers 并行化警告
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 import sys
+import json
+import asyncio
 import argparse
-from typing import Optional, List
+import threading
+from typing import Optional, List, AsyncGenerator
 from contextlib import asynccontextmanager
+from concurrent.futures import ThreadPoolExecutor
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 import uvicorn
 
@@ -91,13 +100,16 @@ class ChatRequest(BaseModel):
     session_id: str = Field(default="default", description="会话ID")
     enable_web_search: bool = Field(default=False, description="是否启用联网搜索")
     deep_think: bool = Field(default=False, description="是否启用深度思考(TOT)")
-    thought_branches: int = Field(default=3, description="思考分支数量")
-    thought_depth: int = Field(default=2, description="思考深度")
+    thought_branches: int = Field(default=5, description="思考分支数量")
+    thought_depth: int = Field(default=3, description="思考深度")
 
 
 class ChatResponse(BaseModel):
     response: str = Field(..., description="助手回复")
     session_id: str = Field(..., description="会话ID")
+    thinking_process: str = Field(default="", description="TOT思考过程")
+    tot_score: float = Field(default=0.0, description="TOT最佳得分")
+    deep_think: bool = Field(default=False, description="是否使用了深度思考")
 
 
 class MemoryStatsResponse(BaseModel):
@@ -150,6 +162,7 @@ async def chat(request: ChatRequest):
     
     接收用户消息，返回助手回复
     支持 enable_web_search 参数强制启用联网搜索
+    支持 deep_think 参数启用 TOT 深度思考，并返回思考过程
     """
     global chatbot, langgraph_agent
     
@@ -160,22 +173,27 @@ async def chat(request: ChatRequest):
         try:
             # 如果启用联网搜索，使用带搜索的方法
             if request.enable_web_search:
-                response = langgraph_agent.chat_with_search(
+                result = langgraph_agent.chat_with_search(
                     request.message,
                     deep_think=request.deep_think,
                     max_branches=request.thought_branches,
                     max_depth=request.thought_depth
                 )
             else:
-                response = langgraph_agent.chat(
+                result = langgraph_agent.chat(
                     request.message,
                     deep_think=request.deep_think,
                     max_branches=request.thought_branches,
                     max_depth=request.thought_depth
                 )
+            
+            # result 现在是 dict，包含 response, thinking_process, tot_score, deep_think
             return ChatResponse(
-                response=response,
-                session_id=request.session_id
+                response=result.get("response", ""),
+                session_id=request.session_id,
+                thinking_process=result.get("thinking_process", ""),
+                tot_score=result.get("tot_score", 0.0),
+                deep_think=result.get("deep_think", False)
             )
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
@@ -187,10 +205,107 @@ async def chat(request: ChatRequest):
             response = chatbot.chat(request.message)
             return ChatResponse(
                 response=response,
-                session_id=request.session_id
+                session_id=request.session_id,
+                thinking_process="",
+                tot_score=0.0,
+                deep_think=False
             )
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
+
+
+async def generate_sse_events(request: ChatRequest) -> AsyncGenerator[str, None]:
+    """
+    生成 SSE 事件流
+    使用线程池执行同步生成器，避免阻塞事件循环
+    """
+    global langgraph_agent
+    
+    if langgraph_agent is None:
+        yield f"data: {json.dumps({'type': 'error', 'content': 'Agent not initialized'})}\n\n"
+        return
+    
+    try:
+        # 选择流式方法
+        if request.enable_web_search:
+            stream_func = lambda: langgraph_agent.chat_with_search_stream(
+                request.message,
+                deep_think=request.deep_think,
+                max_branches=request.thought_branches,
+                max_depth=request.thought_depth
+            )
+        else:
+            stream_func = lambda: langgraph_agent.chat_stream(
+                request.message,
+                deep_think=request.deep_think,
+                max_branches=request.thought_branches,
+                max_depth=request.thought_depth
+            )
+        
+        # 使用队列来传递事件
+        import queue
+        event_queue = queue.Queue()
+        stream_done = threading.Event()
+        
+        def run_stream():
+            try:
+                for event in stream_func():
+                    event_queue.put(event)
+                event_queue.put(None)  # 结束信号
+            except Exception as e:
+                event_queue.put({'type': 'error', 'content': str(e)})
+                event_queue.put(None)
+            finally:
+                stream_done.set()
+        
+        # 在线程池中运行同步生成器
+        loop = asyncio.get_event_loop()
+        executor = ThreadPoolExecutor(max_workers=1)
+        loop.run_in_executor(executor, run_stream)
+        
+        # 异步读取队列 - 使用更短的轮询间隔实现实时输出
+        while True:
+            try:
+                # 使用阻塞式获取，超时10ms，实现近实时输出
+                event = event_queue.get(timeout=0.01)
+                if event is None:
+                    yield f"data: {json.dumps({'type': 'done'})}\n\n"
+                    return
+                event_data = json.dumps(event, ensure_ascii=False)
+                yield f"data: {event_data}\n\n"
+            except queue.Empty:
+                # 检查流是否已完成
+                if stream_done.is_set() and event_queue.empty():
+                    yield f"data: {json.dumps({'type': 'done'})}\n\n"
+                    return
+                await asyncio.sleep(0.005)  # 5ms 轮询，更流畅
+        
+    except Exception as e:
+        error_event = json.dumps({'type': 'error', 'content': str(e)}, ensure_ascii=False)
+        yield f"data: {error_event}\n\n"
+
+
+@app.post("/api/chat/stream")
+async def chat_stream(request: ChatRequest):
+    """
+    流式对话接口 (SSE)
+    
+    接收用户消息，以 Server-Sent Events 流式返回助手回复
+    支持 enable_web_search 参数强制启用联网搜索
+    支持 deep_think 参数启用 TOT 深度思考，边思考边输出
+    """
+    if not USE_LANGGRAPH:
+        raise HTTPException(status_code=400, detail="Streaming only supported with LangGraph agent")
+    
+    return StreamingResponse(
+        generate_sse_events(request),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # 禁用 nginx 缓冲
+        }
+    )
 
 
 @app.get("/api/stats", response_model=MemoryStatsResponse)
@@ -621,14 +736,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "--branches", 
         type=int, 
-        default=3, 
-        help="思考分支数量 (默认: 3)"
+        default=5, 
+        help="思考分支数量 (默认: 5)"
     )
     parser.add_argument(
         "--depth", 
         type=int, 
-        default=2, 
-        help="思考深度 (默认: 2)"
+        default=3, 
+        help="思考深度 (默认: 3)"
     )
     parser.add_argument(
         "--model", 

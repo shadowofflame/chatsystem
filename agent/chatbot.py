@@ -10,14 +10,39 @@ from typing import List, Dict, Optional
 from dotenv import load_dotenv
 
 from langchain_openai import ChatOpenAI
-from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain.schema import HumanMessage, AIMessage, SystemMessage
-from langchain.memory import ConversationBufferWindowMemory
-from langchain.chains import ConversationChain
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 
 from memory_store import MemoryStore
+
+
+class SimpleConversationMemory:
+    """简单的对话记忆管理类，替代弃用的 ConversationBufferWindowMemory"""
+    
+    def __init__(self, k: int = 10, memory_key: str = "chat_history"):
+        self.k = k  # 保留的对话轮数
+        self.memory_key = memory_key
+        self.messages: List[HumanMessage | AIMessage] = []
+    
+    def load_memory_variables(self, inputs: dict) -> dict:
+        """加载记忆变量"""
+        return {self.memory_key: self.messages[-self.k * 2:] if self.k else self.messages}
+    
+    def save_context(self, inputs: dict, outputs: dict) -> None:
+        """保存对话上下文"""
+        input_str = inputs.get("input", "")
+        output_str = outputs.get("output", "")
+        self.messages.append(HumanMessage(content=input_str))
+        self.messages.append(AIMessage(content=output_str))
+        # 保持在窗口大小内
+        if self.k and len(self.messages) > self.k * 2:
+            self.messages = self.messages[-self.k * 2:]
+    
+    def clear(self) -> None:
+        """清空记忆"""
+        self.messages = []
 import re
 
 # 加载环境变量
@@ -84,10 +109,9 @@ class ChatbotWithMemory:
         # 初始化长时记忆存储（向量数据库）
         self.memory_store = MemoryStore(persist_directory=memory_dir)
         
-        # 初始化短时记忆（LangChain 对话缓存）
-        self.short_term_memory = ConversationBufferWindowMemory(
+        # 初始化短时记忆（使用自定义对话缓存）
+        self.short_term_memory = SimpleConversationMemory(
             k=short_term_limit,
-            return_messages=True,
             memory_key="chat_history"
         )
         

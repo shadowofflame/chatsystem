@@ -33,11 +33,11 @@ public class ChatRequest {
      * 思考分支数量 (TOT参数)
      */
     @Builder.Default
-    private Integer thoughtBranches = 3;
+    private Integer thoughtBranches = 5;
     
     /**
      * 思考深度 (TOT参数)
      */
     @Builder.Default
-    private Integer thoughtDepth = 2;
+    private Integer thoughtDepth = 3;
 }
